@@ -804,37 +804,66 @@
   function applyLayout(mode) {
     if (!state.nodes.length) return;
     pushHistory();
-    const root = state.nodes.find((n) => !n.parentId) || state.nodes[0];
-    const children = state.nodes.filter((n) => n.parentId === root.id);
-    const others = state.nodes.filter((n) => n.parentId && n.parentId !== root.id);
 
+    const root = state.nodes.find((n) => !n.parentId) || state.nodes[0];
     const centreX = root.x;
     const centreY = root.y;
 
+    const directChildren = state.nodes.filter((n) => n.parentId === root.id);
+    const others = state.nodes.filter((n) => n.parentId && n.parentId !== root.id);
+
     if (mode === "radial") {
       const radius = 260;
-      const step = (Math.PI * 2) / Math.max(children.length, 1);
-      children.forEach((child, index) => {
+      const step = (Math.PI * 2) / Math.max(directChildren.length, 1);
+      directChildren.forEach((child, index) => {
         child.x = centreX + Math.cos(step * index) * radius;
         child.y = centreY + Math.sin(step * index) * radius;
       });
     } else if (mode === "tree") {
-      const levelGapY = 160;
-      const levelGapX = 220;
-      root.x = centreX;
-      root.y = centreY;
-      const rootChildren = children;
-      const totalWidth = (rootChildren.length - 1) * levelGapX;
-      rootChildren.forEach((child, index) => {
-        child.x = centreX - totalWidth / 2 + index * levelGapX;
-        child.y = centreY + levelGapY;
-      });
+      // Build adjacency map for full tree
+      const childMap = {};
+      for (const node of state.nodes) {
+        if (!node.parentId) continue;
+        if (!childMap[node.parentId]) childMap[node.parentId] = [];
+        childMap[node.parentId].push(node);
+      }
+
+      // DFS assigning depth and xIndex using a tidy-tree style pass
+      let indexCounter = 0;
+      function dfs(node, depth) {
+        const children = childMap[node.id] || [];
+        node._depth = depth;
+        if (children.length === 0) {
+          node._xIndex = indexCounter++;
+        } else {
+          children.forEach((child) => dfs(child, depth + 1));
+          const first = children[0]._xIndex;
+          const last = children[children.length - 1]._xIndex;
+          node._xIndex = (first + last) / 2;
+        }
+      }
+
+      dfs(root, 0);
+
+      const rootDepth = root._depth || 0;
+      const rootIndex = root._xIndex || 0;
+      const gapX = 220;
+      const gapY = 160;
+
+      for (const node of state.nodes) {
+        if (typeof node._xIndex !== "number" || typeof node._depth !== "number") continue;
+        const dxIndex = node._xIndex - rootIndex;
+        node.x = centreX + dxIndex * gapX;
+        node.y = centreY + (node._depth - rootDepth) * gapY;
+        delete node._xIndex;
+        delete node._depth;
+      }
     } else if (mode === "flow") {
       const gapX = 260;
       const gapY = 120;
       root.x = centreX;
       root.y = centreY;
-      const rootChildren = children;
+      const rootChildren = directChildren;
       const totalHeight = (rootChildren.length - 1) * gapY;
       rootChildren.forEach((child, index) => {
         child.x = centreX + gapX;
@@ -842,15 +871,17 @@
       });
     }
 
-    // Simple placement for deeper descendants
-    others.forEach((node) => {
-      const parent = getNodeById(node.parentId);
-      if (!parent) return;
-      const angle = Math.random() * Math.PI * 2;
-      const distance = 140;
-      node.x = parent.x + Math.cos(angle) * distance;
-      node.y = parent.y + Math.sin(angle) * distance;
-    });
+    // Simple placement for deeper descendants in non-tree layouts
+    if (mode !== "tree") {
+      others.forEach((node) => {
+        const parent = getNodeById(node.parentId);
+        if (!parent) return;
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 140;
+        node.x = parent.x + Math.cos(angle) * distance;
+        node.y = parent.y + Math.sin(angle) * distance;
+      });
+    }
 
     draw();
   }
