@@ -18,6 +18,7 @@
   const nodeFillColorInput = document.getElementById("nodeFillColorInput");
   const nodeTextColorInput = document.getElementById("nodeTextColorInput");
   const connectionColorInput = document.getElementById("connectionColorInput");
+  const applyNodeStyleToAllBtn = document.getElementById("applyNodeStyleToAllBtn");
 
   const fontSizeInput = document.getElementById("fontSizeInput");
   const connectorStyleSelect = document.getElementById("connectorStyleSelect");
@@ -69,13 +70,25 @@
   // Hover state for Freeform-style handles
   let hoverNodeId = null;
   let hoverHandleDirection = null;
+  let showHandles = true;
+
+  // Draw scheduling to avoid lag on hover
+  let needsDraw = false;
+  function scheduleDraw() {
+    if (needsDraw) return;
+    needsDraw = true;
+    requestAnimationFrame(() => {
+      needsDraw = false;
+      draw();
+    });
+  }
 
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
     canvas.width = rect.width * window.devicePixelRatio;
     canvas.height = rect.height * window.devicePixelRatio;
     ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-    draw();
+    scheduleDraw();
   }
 
   window.addEventListener("resize", resizeCanvas);
@@ -89,7 +102,7 @@
 
   function restoreStateFrom(serialised) {
     state = JSON.parse(serialised);
-    draw();
+    scheduleDraw();
   }
 
   function undo() {
@@ -127,7 +140,7 @@
     state.panX = canvas.width / (2 * window.devicePixelRatio);
     state.panY = canvas.height / (2 * window.devicePixelRatio);
     state.scale = 1;
-    draw();
+    scheduleDraw();
     // Immediately allow typing into the root node on new maps
     setTimeout(() => {
       const rootNode = getNodeById("root");
@@ -250,7 +263,7 @@
     state.connections.push({ from: parent.id, to: id });
     state.selectedNodeId = id;
     nodeTextInput.value = node.text;
-    draw();
+    scheduleDraw();
     openInlineEditor(node);
   }
 
@@ -278,7 +291,7 @@
     }
     state.selectedNodeId = id;
     nodeTextInput.value = newNode.text;
-    draw();
+    scheduleDraw();
     openInlineEditor(newNode);
   }
 
@@ -312,7 +325,7 @@
     );
     state.selectedNodeId = state.nodes.length ? state.nodes[0].id : null;
     nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId).text : "";
-    draw();
+    scheduleDraw();
   }
 
   function draw() {
@@ -396,7 +409,7 @@
       );
 
       // Freeform-style connection handles when hovered or selected
-      if (isHovered || isSelected) {
+      if (showHandles && (isHovered || isSelected)) {
         drawHandles(ctx, node);
       }
 
@@ -444,6 +457,8 @@
   function drawHandleWithArrow(ctx, cx, cy, direction, dimmed) {
     const r = HANDLE_SIZE / 2;
     ctx.save();
+
+    // Circle button
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = dimmed ? "rgba(37,99,235,0.16)" : "rgba(37,99,235,0.9)";
@@ -454,34 +469,29 @@
       : "rgba(37,99,235,0.95)";
     ctx.stroke();
 
-    // Arrow glyph inspired by Freeform: simple chevron inside the circle
+    // Freeform-inspired arrow chevron, rotated per direction
+    let angle = 0;
+    if (direction === "right") angle = 0;
+    else if (direction === "topRight") angle = -Math.PI / 4;
+    else if (direction === "bottomRight") angle = Math.PI / 4;
+    else if (direction === "left") angle = Math.PI;
+    else if (direction === "topLeft") angle = -3 * Math.PI / 4;
+    else if (direction === "bottomLeft") angle = 3 * Math.PI / 4;
+    else if (direction === "top") angle = -Math.PI / 2;
+    else if (direction === "bottom") angle = Math.PI / 2;
+
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+
     ctx.beginPath();
     ctx.strokeStyle = "white";
     ctx.lineWidth = 2;
     const arrowLen = r * 0.9;
-    const offset = arrowLen * 0.4;
+    const halfWidth = arrowLen * 0.35;
 
-    if (direction === "right" || direction === "topRight" || direction === "bottomRight") {
-      ctx.moveTo(cx - offset, cy - arrowLen * 0.4);
-      ctx.lineTo(cx + arrowLen * 0.4, cy);
-      ctx.lineTo(cx - offset, cy + arrowLen * 0.4);
-    } else if (
-      direction === "left" ||
-      direction === "topLeft" ||
-      direction === "bottomLeft"
-    ) {
-      ctx.moveTo(cx + offset, cy - arrowLen * 0.4);
-      ctx.lineTo(cx - arrowLen * 0.4, cy);
-      ctx.lineTo(cx + offset, cy + arrowLen * 0.4);
-    } else if (direction === "top") {
-      ctx.moveTo(cx - arrowLen * 0.35, cy + offset);
-      ctx.lineTo(cx, cy - arrowLen * 0.4);
-      ctx.lineTo(cx + arrowLen * 0.35, cy + offset);
-    } else if (direction === "bottom") {
-      ctx.moveTo(cx - arrowLen * 0.35, cy - offset);
-      ctx.lineTo(cx, cy + arrowLen * 0.4);
-      ctx.lineTo(cx + arrowLen * 0.35, cy - offset);
-    }
+    ctx.moveTo(-arrowLen * 0.4, -halfWidth);
+    ctx.lineTo(arrowLen * 0.4, 0);
+    ctx.lineTo(-arrowLen * 0.4, halfWidth);
     ctx.stroke();
 
     ctx.restore();
@@ -607,6 +617,7 @@
     // Check if clicking on a Freeform-style handle first
     const handle = findHandleAt(world.x, world.y);
     if (handle && button === 0) {
+      showHandles = true;
       addChildNode(handle.node, handle.direction);
       return;
     }
@@ -618,9 +629,15 @@
       dragNodeId = node.id;
       state.selectedNodeId = node.id;
       nodeTextInput.value = node.text || "";
-      draw();
+      showHandles = true;
+      scheduleDraw();
     } else {
       isPanning = true;
+      // hide arrows when clicking on blank background
+      hoverNodeId = null;
+      hoverHandleDirection = null;
+      showHandles = false;
+      scheduleDraw();
     }
   }
 
@@ -648,17 +665,23 @@
     }
 
     const newHoverId = nodeForHover ? nodeForHover.id : null;
-    let needsRedraw = false;
+    let changed = false;
     if (newHoverId !== hoverNodeId) {
       hoverNodeId = newHoverId;
-      needsRedraw = true;
+      changed = true;
     }
     if (newHoverDir !== prevHoverDir) {
       hoverHandleDirection = newHoverDir;
-      needsRedraw = true;
+      changed = true;
     }
-    if (needsRedraw) {
-      draw();
+    if (candidateForHandles) {
+      if (!showHandles) {
+        showHandles = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      scheduleDraw();
     }
 
     if (!isPanning && !isDraggingNode) {
@@ -679,12 +702,12 @@
         const worldPrev = screenToWorld(x - dx, y - dy);
         node.x += worldDelta.x - worldPrev.x;
         node.y += worldDelta.y - worldPrev.y;
-        draw();
+        scheduleDraw();
       }
     } else if (isPanning) {
       state.panX += dx;
       state.panY += dy;
-      draw();
+      scheduleDraw();
     }
   }
 
@@ -755,7 +778,7 @@
       pushHistory();
       node.text = inlineEditor.value || "";
       nodeTextInput.value = node.text;
-      draw();
+      scheduleDraw();
     }
     inlineEditor.remove();
     inlineEditor = null;
@@ -779,7 +802,7 @@
       const after = screenToWorld(mouseX, mouseY);
       state.panX += (after.x - before.x) * state.scale;
       state.panY += (after.y - before.y) * state.scale;
-      draw();
+      scheduleDraw();
     },
     { passive: false }
   );
@@ -808,7 +831,7 @@
     const d = distance(e.touches[0], e.touches[1]);
     const factor = d / pinch.startDist;
     state.scale = Math.max(0.2, Math.min(4, pinch.startScale * factor));
-    draw();
+    scheduleDraw();
   }
 
   function pinchEnd() {
@@ -828,7 +851,7 @@
     state.scale = scale;
     state.panX = width / 2 - (bounds.x + bounds.width / 2) * scale;
     state.panY = height / 2 - (bounds.y + bounds.height / 2) * scale;
-    draw();
+    scheduleDraw();
   }
 
   function getContentBounds() {
@@ -950,7 +973,7 @@
       });
     }
 
-    draw();
+    scheduleDraw();
   }
 
   function getQualityScale(preset) {
@@ -1260,7 +1283,7 @@
     pushHistory();
     state = match.data;
     nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId)?.text || "" : "";
-    draw();
+    scheduleDraw();
   }
 
   function newMap() {
@@ -1292,30 +1315,37 @@
   deleteNodeBtn.addEventListener("click", deleteSelectedNode);
   autoFitBtn.addEventListener("click", autoFit);
 
+  function markNodeStyleDirty() {
+    applyNodeStyleToAllBtn.style.display = "inline-block";
+  }
+
   nodeBorderColorInput.addEventListener("change", () => {
     state.nodeBorderColor = nodeBorderColorInput.value;
     const node = getNodeById(state.selectedNodeId);
     if (node) node.borderColor = state.nodeBorderColor;
-    draw();
+    markNodeStyleDirty();
+    scheduleDraw();
   });
 
   nodeFillColorInput.addEventListener("change", () => {
     state.nodeFillColor = nodeFillColorInput.value;
     const node = getNodeById(state.selectedNodeId);
     if (node) node.fillColor = state.nodeFillColor;
-    draw();
+    markNodeStyleDirty();
+    scheduleDraw();
   });
 
   nodeTextColorInput.addEventListener("change", () => {
     state.nodeTextColor = nodeTextColorInput.value;
     const node = getNodeById(state.selectedNodeId);
     if (node) node.textColor = state.nodeTextColor;
-    draw();
+    markNodeStyleDirty();
+    scheduleDraw();
   });
 
   connectionColorInput.addEventListener("change", () => {
     state.connectionColor = connectionColorInput.value;
-    draw();
+    scheduleDraw();
   });
 
   fontSizeInput.addEventListener("change", () => {
@@ -1323,12 +1353,13 @@
     state.fontSize = value;
     const node = getNodeById(state.selectedNodeId);
     if (node) node.fontSize = value;
-    draw();
+    markNodeStyleDirty();
+    scheduleDraw();
   });
 
   connectorStyleSelect.addEventListener("change", () => {
     state.connectorStyle = connectorStyleSelect.value;
-    draw();
+    scheduleDraw();
   });
 
   treeDirectionSelect.addEventListener("change", () => {
@@ -1339,12 +1370,24 @@
     applyLayout(layoutModeSelect.value);
   });
 
+  applyNodeStyleToAllBtn.addEventListener("click", () => {
+    pushHistory();
+    for (const node of state.nodes) {
+      node.borderColor = state.nodeBorderColor;
+      node.fillColor = state.nodeFillColor;
+      node.textColor = state.nodeTextColor;
+      node.fontSize = state.fontSize;
+    }
+    applyNodeStyleToAllBtn.style.display = "none";
+    scheduleDraw();
+  });
+
   updateTextBtn.addEventListener("click", () => {
     const node = getNodeById(state.selectedNodeId);
     if (!node) return;
     pushHistory();
     node.text = nodeTextInput.value || "";
-    draw();
+    scheduleDraw();
   });
 
   sizePresetSelect.addEventListener("change", () => {
@@ -1355,9 +1398,21 @@
 
   exportBtn.addEventListener("click", exportMap);
 
-  // Keyboard shortcuts (Miro-like): Enter = sibling, Tab = child, Delete = delete node
+  // Keyboard shortcuts (Miro-like): Enter = sibling, Tab = child, Delete = delete node, Ctrl/Cmd+Z undo/redo
   document.addEventListener("keydown", (e) => {
     if (inlineEditor) return; // let editor handle keys
+
+    // Undo / Redo
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+      return;
+    }
+
     const node = getNodeById(state.selectedNodeId);
     if (!node) return;
     if (e.key === "Tab") {
@@ -1372,7 +1427,7 @@
     } else if (e.key === "Escape") {
       state.selectedNodeId = null;
       nodeTextInput.value = "";
-      draw();
+      scheduleDraw();
     }
   });
 
