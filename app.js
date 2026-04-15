@@ -25,6 +25,8 @@
   const layoutModeSelect = document.getElementById("layoutModeSelect");
   const treeDirectionSelect = document.getElementById("treeDirectionSelect");
   const treeColorSchemeSelect = document.getElementById("treeColorSchemeSelect");
+  const autoLayoutToggle = document.getElementById("autoLayoutToggle");
+  const autoLayoutIntervalInput = document.getElementById("autoLayoutIntervalInput");
   const applyTreeColorsBtn = document.getElementById("applyTreeColorsBtn");
   const applyLayoutBtn = document.getElementById("applyLayoutBtn");
 
@@ -80,6 +82,11 @@
   let hoverNodeId = null;
   let hoverHandleDirection = null;
   let showHandles = true;
+
+  // Auto-layout
+  let autoLayoutTimer = null;
+  let autoLayoutEnabled = false;
+  let autoLayoutIntervalSec = 10;
 
   // Draw scheduling to avoid lag on hover
   let needsDraw = false;
@@ -161,7 +168,6 @@
     state.scale = 1;
     syncInputsFromState();
     scheduleDraw();
-    // Immediately allow typing into the root node on new maps
     setTimeout(() => {
       const rootNode = getNodeById("root");
       if (rootNode) {
@@ -214,6 +220,19 @@
     });
   }
 
+  function resetAutoLayoutTimer() {
+    if (autoLayoutTimer) {
+      clearInterval(autoLayoutTimer);
+      autoLayoutTimer = null;
+    }
+    if (!autoLayoutEnabled || !state.nodes.length) return;
+    const ms = Math.max(1, autoLayoutIntervalSec) * 1000;
+    autoLayoutTimer = setInterval(() => {
+      if (!state.nodes.length) return;
+      applyLayout(layoutModeSelect.value);
+    }, ms);
+  }
+
   function setActiveTab(index) {
     if (index < 0 || index >= tabs.length) return;
     activeTabIndex = index;
@@ -223,6 +242,7 @@
     future = [];
     syncInputsFromState();
     refreshTabBar();
+    resetAutoLayoutTimer();
     scheduleDraw();
   }
 
@@ -230,7 +250,7 @@
     if (index < 0 || index >= tabs.length) return;
     tabs.splice(index, 1);
     if (!tabs.length) {
-      createNewTab("Untitled 1", null, true);
+      createNewTab("Untitled 1", null);
       return;
     }
     if (activeTabIndex >= tabs.length) {
@@ -242,10 +262,11 @@
     future = [];
     syncInputsFromState();
     refreshTabBar();
+    resetAutoLayoutTimer();
     scheduleDraw();
   }
 
-  function createNewTab(name, id, initial) {
+  function createNewTab(name, id) {
     state = {
       nodes: [],
       connections: [],
@@ -266,6 +287,7 @@
     tabs.push(tab);
     activeTabIndex = tabs.length - 1;
     refreshTabBar();
+    resetAutoLayoutTimer();
   }
 
   // Handles & drawing -----------------------------------------------------
@@ -458,7 +480,6 @@
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Connections
     ctx.strokeStyle = state.connectionColor;
     for (const c of state.connections) {
       const from = getNodeById(c.from);
@@ -478,7 +499,6 @@
 
     ctx.setLineDash([]);
 
-    // Nodes
     for (const node of state.nodes) {
       const isSelected = node.id === state.selectedNodeId;
       const isHovered = node.id === hoverNodeId;
@@ -491,12 +511,10 @@
       const borderColor = node.borderColor || state.nodeBorderColor;
       const textColor = node.textColor || state.nodeTextColor;
 
-      // Drop shadow
       ctx.fillStyle = "rgba(15,23,42,0.08)";
       drawRoundedRect(ctx, node.x - rx + 4, node.y - ry + 6, rx * 2, ry * 2, 14);
       ctx.fill();
 
-      // Card
       drawRoundedRect(ctx, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
       ctx.fillStyle = fillColor;
       ctx.globalAlpha = 0.96;
@@ -506,7 +524,6 @@
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
-      // Text
       ctx.fillStyle = textColor;
       const fSize = node.fontSize || state.fontSize;
       ctx.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
@@ -573,7 +590,6 @@
     const r = HANDLE_SIZE / 2;
     ctx.save();
 
-    // Circle button
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = dimmed ? "rgba(37,99,235,0.16)" : "rgba(37,99,235,0.9)";
@@ -584,7 +600,6 @@
       : "rgba(37,99,235,0.95)";
     ctx.stroke();
 
-    // Freeform-inspired arrow chevron, rotated per direction
     let angle = 0;
     if (direction === "right") angle = 0;
     else if (direction === "topRight") angle = -Math.PI / 4;
@@ -1467,12 +1482,13 @@
     future = [];
     syncInputsFromState();
     refreshTabBar();
+    resetAutoLayoutTimer();
     scheduleDraw();
   }
 
   function newMap() {
     const label = `Untitled ${tabs.length + 1}`;
-    createNewTab(label, null, false);
+    createNewTab(label, null);
   }
 
   // Node style & layout events -------------------------------------------
@@ -1548,6 +1564,19 @@
     scheduleDraw();
   });
 
+  autoLayoutToggle.addEventListener("change", () => {
+    autoLayoutEnabled = autoLayoutToggle.checked;
+    resetAutoLayoutTimer();
+  });
+
+  autoLayoutIntervalInput.addEventListener("change", () => {
+    let v = parseInt(autoLayoutIntervalInput.value, 10);
+    if (!v || v < 1) v = 5;
+    autoLayoutIntervalSec = v;
+    autoLayoutIntervalInput.value = v;
+    resetAutoLayoutTimer();
+  });
+
   updateTextBtn.addEventListener("click", () => {
     const node = getNodeById(state.selectedNodeId);
     if (!node) return;
@@ -1564,7 +1593,6 @@
 
   exportBtn.addEventListener("click", exportMap);
 
-  // Keyboard shortcuts: Enter= sibling, Tab=child, Delete=delete, Ctrl/Cmd+Z undo/redo
   document.addEventListener("keydown", (e) => {
     if (inlineEditor) return;
 
@@ -1596,8 +1624,6 @@
     }
   });
 
-  // Toolbar events --------------------------------------------------------
-
   newMapBtn.addEventListener("click", newMap);
   saveMapBtn.addEventListener("click", saveCurrentMap);
   openMapBtn.addEventListener("click", openSelectedMap);
@@ -1607,8 +1633,6 @@
   deleteNodeBtn.addEventListener("click", deleteSelectedNode);
   autoFitBtn.addEventListener("click", autoFit);
 
-  // Initialisation --------------------------------------------------------
-
   refreshMapSelect();
-  createNewTab("Untitled 1", null, true);
+  createNewTab("Untitled 1", null);
 })();

@@ -93,6 +93,16 @@
               </select>
             </label>
             <button id="applyTreeColorsBtn" class="secondary small">Apply tree colours</button>
+            <div style="margin-top:0.75rem;">
+              <label style="display:flex; align-items:center; gap:0.35rem;">
+                <input type="checkbox" id="autoLayoutToggle" />
+                Auto layout every
+              </label>
+              <div style="display:flex; align-items:center; gap:0.35rem; margin-top:0.25rem;">
+                <input type="number" id="autoLayoutIntervalInput" min="2" value="10" style="width:4rem;" />
+                <span>seconds</span>
+              </div>
+            </div>
           </div>
           <button id="applyLayoutBtn">Apply layout</button>
         </div>
