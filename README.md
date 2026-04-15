@@ -45,3 +45,23 @@ A fully offline, client-side mind-map web application that runs entirely in the 
 3. Navigate to `http://localhost:8000` and start sketching mind maps.
 
 All maps stay inside your browser storage. There is no telemetry, analytics, or server-side processing.
+
+## Publishing
+
+This repository is designed to be deployed as a static site (no backend). Common options:
+
+- **GitHub Pages**
+  - In GitHub, go to **Settings → Pages**.
+  - Under **Source**, choose the `main` branch and the root (`/`) folder.
+  - Save; GitHub will build and serve the site at a URL like `https://<user>.github.io/offline-mindmap-app/`.
+- **Other static hosts** (Netlify, Vercel, Cloudflare Pages, etc.)
+  - Connect this repo and configure as a static site with `index.html` as the entry point.
+  - No build command is required; just serve the files as-is.
+
+## License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+
+## Third‑party libraries
+
+- [pdf-lib](https://github.com/Hopding/pdf-lib) — used for client-side PDF generation; it is licensed under the MIT license, and its license notice is preserved via this README and the linked LICENSE in the pdf-lib repository.
