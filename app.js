@@ -14,10 +14,15 @@
   const deleteNodeBtn = document.getElementById("deleteNodeBtn");
   const autoFitBtn = document.getElementById("autoFitBtn");
 
-  const nodeColorInput = document.getElementById("nodeColorInput");
+  const nodeBorderColorInput = document.getElementById("nodeBorderColorInput");
+  const nodeFillColorInput = document.getElementById("nodeFillColorInput");
+  const nodeTextColorInput = document.getElementById("nodeTextColorInput");
+  const connectionColorInput = document.getElementById("connectionColorInput");
+
   const fontSizeInput = document.getElementById("fontSizeInput");
   const connectorStyleSelect = document.getElementById("connectorStyleSelect");
   const layoutModeSelect = document.getElementById("layoutModeSelect");
+  const treeDirectionSelect = document.getElementById("treeDirectionSelect");
   const applyLayoutBtn = document.getElementById("applyLayoutBtn");
 
   const nodeTextInput = document.getElementById("nodeTextInput");
@@ -42,16 +47,20 @@
     panY: 0,
     scale: 1,
     connectorStyle: "solid",
-    nodeColor: "#facc15", // soft sticky-note yellow
+    nodeBorderColor: "#e5e7eb",
+    nodeFillColor: "#facc15",
+    nodeTextColor: "#111827",
+    connectionColor: "#9ca3af",
     fontSize: 16,
+    treeDirection: "top-down",
   };
 
   let history = [];
   let future = [];
 
   const NODE_RADIUS = 60;
-  const HANDLE_SIZE = 22;
-  const HANDLE_GAP = 12;
+  const HANDLE_SIZE = 26;
+  const HANDLE_GAP = 16;
 
   // Inline editor state
   let inlineEditor = null;
@@ -106,7 +115,9 @@
         text: "Central idea",
         x: 0,
         y: 0,
-        color: state.nodeColor,
+        fillColor: state.nodeFillColor,
+        borderColor: state.nodeBorderColor,
+        textColor: state.nodeTextColor,
         fontSize: state.fontSize,
         parentId: null,
       },
@@ -150,7 +161,7 @@
 
   function getHandleDirectionAt(node, wx, wy) {
     const centres = getHandleCenters(node);
-    const half = HANDLE_SIZE / 2;
+    const hitRadius = HANDLE_SIZE * 0.7;
     for (const dir of [
       "top",
       "right",
@@ -163,7 +174,9 @@
     ]) {
       const c = centres[dir];
       if (!c) continue;
-      if (Math.abs(wx - c.x) <= half && Math.abs(wy - c.y) <= half) {
+      const dx = wx - c.x;
+      const dy = wy - c.y;
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
         return dir;
       }
     }
@@ -227,7 +240,9 @@
       text: "",
       x,
       y,
-      color: state.nodeColor,
+      fillColor: state.nodeFillColor,
+      borderColor: state.nodeBorderColor,
+      textColor: state.nodeTextColor,
       fontSize: state.fontSize,
       parentId: parent.id,
     };
@@ -251,7 +266,9 @@
       text: "",
       x: base.x,
       y: node.y + offsetY,
-      color: state.nodeColor,
+      fillColor: state.nodeFillColor,
+      borderColor: state.nodeBorderColor,
+      textColor: state.nodeTextColor,
       fontSize: state.fontSize,
       parentId: parent ? parent.id : node.parentId,
     };
@@ -313,6 +330,7 @@
     ctx.lineJoin = "round";
 
     // Connections
+    ctx.strokeStyle = state.connectionColor;
     for (const c of state.connections) {
       const from = getNodeById(c.from);
       const to = getNodeById(c.to);
@@ -323,7 +341,6 @@
       } else {
         ctx.setLineDash([]);
       }
-      ctx.strokeStyle = "#9ca3af";
       ctx.lineWidth = 2;
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
@@ -341,6 +358,10 @@
       const rx = radius * 1.3;
       const ry = radius * 0.8;
 
+      const fillColor = node.fillColor || state.nodeFillColor;
+      const borderColor = node.borderColor || state.nodeBorderColor;
+      const textColor = node.textColor || state.nodeTextColor;
+
       // Drop shadow
       ctx.fillStyle = "rgba(15,23,42,0.08)";
       drawRoundedRect(ctx, node.x - rx + 4, node.y - ry + 6, rx * 2, ry * 2, 14);
@@ -348,16 +369,16 @@
 
       // Card
       drawRoundedRect(ctx, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
-      ctx.fillStyle = node.color || state.nodeColor;
+      ctx.fillStyle = fillColor;
       ctx.globalAlpha = 0.96;
       ctx.fill();
       ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = isSelected ? "#2563eb" : "#e5e7eb";
+      ctx.strokeStyle = isSelected ? "#2563eb" : borderColor;
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
       // Text
-      ctx.fillStyle = "#111827";
+      ctx.fillStyle = textColor;
       const fSize = node.fontSize || state.fontSize;
       ctx.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
       ctx.textAlign = "left";
@@ -416,22 +437,53 @@
       const c = centres[dir];
       if (!c) continue;
       const dimmed = hoverHandleDirection && hoverHandleDirection !== dir;
-      drawHandleCircle(ctx, c.x, c.y, dimmed);
+      drawHandleWithArrow(ctx, c.x, c.y, dir, dimmed);
     }
   }
 
-  function drawHandleCircle(ctx, cx, cy, dimmed) {
+  function drawHandleWithArrow(ctx, cx, cy, direction, dimmed) {
     const r = HANDLE_SIZE / 2;
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = dimmed ? "rgba(37,99,235,0.25)" : "rgba(37,99,235,0.9)";
+    ctx.fillStyle = dimmed ? "rgba(37,99,235,0.16)" : "rgba(37,99,235,0.9)";
     ctx.fill();
     ctx.lineWidth = 1;
     ctx.strokeStyle = dimmed
-      ? "rgba(37,99,235,0.35)"
+      ? "rgba(37,99,235,0.3)"
       : "rgba(37,99,235,0.95)";
     ctx.stroke();
+
+    // Arrow glyph inspired by Freeform: simple chevron inside the circle
+    ctx.beginPath();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    const arrowLen = r * 0.9;
+    const offset = arrowLen * 0.4;
+
+    if (direction === "right" || direction === "topRight" || direction === "bottomRight") {
+      ctx.moveTo(cx - offset, cy - arrowLen * 0.4);
+      ctx.lineTo(cx + arrowLen * 0.4, cy);
+      ctx.lineTo(cx - offset, cy + arrowLen * 0.4);
+    } else if (
+      direction === "left" ||
+      direction === "topLeft" ||
+      direction === "bottomLeft"
+    ) {
+      ctx.moveTo(cx + offset, cy - arrowLen * 0.4);
+      ctx.lineTo(cx - arrowLen * 0.4, cy);
+      ctx.lineTo(cx + offset, cy + arrowLen * 0.4);
+    } else if (direction === "top") {
+      ctx.moveTo(cx - arrowLen * 0.35, cy + offset);
+      ctx.lineTo(cx, cy - arrowLen * 0.4);
+      ctx.lineTo(cx + arrowLen * 0.35, cy + offset);
+    } else if (direction === "bottom") {
+      ctx.moveTo(cx - arrowLen * 0.35, cy - offset);
+      ctx.lineTo(cx, cy + arrowLen * 0.4);
+      ctx.lineTo(cx + arrowLen * 0.35, cy - offset);
+    }
+    ctx.stroke();
+
     ctx.restore();
   }
 
@@ -478,8 +530,8 @@
     const { x, y } = screenToWorld(canvasX, canvasY);
     for (let i = state.nodes.length - 1; i >= 0; i--) {
       const node = state.nodes[i];
-      const rx = NODE_RADIUS * 1.3;
-      const ry = NODE_RADIUS * 0.8;
+      const rx = NODE_RADIUS * 1.3 + HANDLE_GAP;
+      const ry = NODE_RADIUS * 0.8 + HANDLE_GAP;
       if (
         x >= node.x - rx &&
         x <= node.x + rx &&
@@ -849,12 +901,27 @@
       const rootIndex = root._xIndex || 0;
       const gapX = 220;
       const gapY = 160;
+      const direction = state.treeDirection || "top-down";
 
       for (const node of state.nodes) {
         if (typeof node._xIndex !== "number" || typeof node._depth !== "number") continue;
         const dxIndex = node._xIndex - rootIndex;
-        node.x = centreX + dxIndex * gapX;
-        node.y = centreY + (node._depth - rootDepth) * gapY;
+        const dyDepth = node._depth - rootDepth;
+
+        if (direction === "top-down") {
+          node.x = centreX + dxIndex * gapX;
+          node.y = centreY + dyDepth * gapY;
+        } else if (direction === "bottom-up") {
+          node.x = centreX + dxIndex * gapX;
+          node.y = centreY - dyDepth * gapY;
+        } else if (direction === "left-right") {
+          node.x = centreX + dyDepth * gapX;
+          node.y = centreY + dxIndex * gapY;
+        } else if (direction === "right-left") {
+          node.x = centreX - dyDepth * gapX;
+          node.y = centreY + dxIndex * gapY;
+        }
+
         delete node._xIndex;
         delete node._depth;
       }
@@ -980,7 +1047,7 @@
       } else {
         context.setLineDash([]);
       }
-      context.strokeStyle = "#9ca3af";
+      context.strokeStyle = state.connectionColor;
       context.lineWidth = 2;
       context.moveTo(from.x, from.y);
       context.lineTo(to.x, to.y);
@@ -995,6 +1062,10 @@
       const rx = radius * 1.3;
       const ry = radius * 0.8;
 
+      const fillColor = node.fillColor || state.nodeFillColor;
+      const borderColor = node.borderColor || state.nodeBorderColor;
+      const textColor = node.textColor || state.nodeTextColor;
+
       context.save();
       // Shadow
       context.fillStyle = "rgba(15,23,42,0.08)";
@@ -1003,16 +1074,16 @@
 
       // Card
       drawRoundedRect(context, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
-      context.fillStyle = node.color || state.nodeColor;
+      context.fillStyle = fillColor;
       context.globalAlpha = 0.96;
       context.fill();
       context.globalAlpha = 1.0;
-      context.strokeStyle = isSelected ? "#2563eb" : "#e5e7eb";
+      context.strokeStyle = isSelected ? "#2563eb" : borderColor;
       context.lineWidth = isSelected ? 3 : 1.5;
       context.stroke();
 
       // Text
-      context.fillStyle = "#111827";
+      context.fillStyle = textColor;
       const fSize = node.fontSize || state.fontSize;
       context.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
       context.textAlign = "left";
@@ -1202,8 +1273,12 @@
       panY: canvas.height / (2 * window.devicePixelRatio),
       scale: 1,
       connectorStyle: connectorStyleSelect.value,
-      nodeColor: nodeColorInput.value,
+      nodeBorderColor: nodeBorderColorInput.value,
+      nodeFillColor: nodeFillColorInput.value,
+      nodeTextColor: nodeTextColorInput.value,
+      connectionColor: connectionColorInput.value,
       fontSize: parseInt(fontSizeInput.value, 10) || 16,
+      treeDirection: treeDirectionSelect.value,
     };
     createInitialMap();
   }
@@ -1217,10 +1292,29 @@
   deleteNodeBtn.addEventListener("click", deleteSelectedNode);
   autoFitBtn.addEventListener("click", autoFit);
 
-  nodeColorInput.addEventListener("change", () => {
-    state.nodeColor = nodeColorInput.value;
+  nodeBorderColorInput.addEventListener("change", () => {
+    state.nodeBorderColor = nodeBorderColorInput.value;
     const node = getNodeById(state.selectedNodeId);
-    if (node) node.color = state.nodeColor;
+    if (node) node.borderColor = state.nodeBorderColor;
+    draw();
+  });
+
+  nodeFillColorInput.addEventListener("change", () => {
+    state.nodeFillColor = nodeFillColorInput.value;
+    const node = getNodeById(state.selectedNodeId);
+    if (node) node.fillColor = state.nodeFillColor;
+    draw();
+  });
+
+  nodeTextColorInput.addEventListener("change", () => {
+    state.nodeTextColor = nodeTextColorInput.value;
+    const node = getNodeById(state.selectedNodeId);
+    if (node) node.textColor = state.nodeTextColor;
+    draw();
+  });
+
+  connectionColorInput.addEventListener("change", () => {
+    state.connectionColor = connectionColorInput.value;
     draw();
   });
 
@@ -1235,6 +1329,10 @@
   connectorStyleSelect.addEventListener("change", () => {
     state.connectorStyle = connectorStyleSelect.value;
     draw();
+  });
+
+  treeDirectionSelect.addEventListener("change", () => {
+    state.treeDirection = treeDirectionSelect.value;
   });
 
   applyLayoutBtn.addEventListener("click", () => {

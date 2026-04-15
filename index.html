@@ -32,8 +32,20 @@
         <div class="panel-section">
           <h3>Node style</h3>
           <label>
-            Colour
-            <input type="color" id="nodeColorInput" value="#1976d2" />
+            Outline colour
+            <input type="color" id="nodeBorderColorInput" value="#e5e7eb" />
+          </label>
+          <label>
+            Fill colour
+            <input type="color" id="nodeFillColorInput" value="#facc15" />
+          </label>
+          <label>
+            Text colour
+            <input type="color" id="nodeTextColorInput" value="#111827" />
+          </label>
+          <label>
+            Connector colour
+            <input type="color" id="connectionColorInput" value="#9ca3af" />
           </label>
           <label>
             Font size (px)
@@ -57,6 +69,15 @@
               <option value="radial">Radial</option>
               <option value="tree">Tree</option>
               <option value="flow">Left-to-right</option>
+            </select>
+          </label>
+          <label>
+            Tree direction
+            <select id="treeDirectionSelect">
+              <option value="top-down">Top to bottom</option>
+              <option value="left-right">Left to right</option>
+              <option value="right-left">Right to left</option>
+              <option value="bottom-up">Bottom to top</option>
             </select>
           </label>
           <button id="applyLayoutBtn">Apply layout</button>
