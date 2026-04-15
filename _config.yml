@@ -1,0 +1,4 @@
+title: Offline Mind Map
+description: Privacy-first, offline mind mapping web app that runs entirely in your browser.
+# Disable default Jekyll theme; use our own HTML/CSS instead
+theme: null
