@@ -1,4 +1,4 @@
-/* Layout, canvas and panels unchanged; only adding basic tab bar styles */
+/* Layout, canvas and panels */
 
 body {
   margin: 0;
@@ -89,18 +89,19 @@ body {
   display: block;
 }
 
-.inline-node-editor {
-  position: fixed;
-  z-index: 20;
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.75rem;
-  border: 2px solid #2563eb;
-  box-shadow: 0 10px 30px rgba(15,23,42,0.25);
-  font-family: inherit;
-  font-size: 0.95rem;
-  resize: none;
-  outline: none;
+#hintOverlay {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15,23,42,0.9);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
 }
+
+/* Panels and controls */
 
 .panel-section {
   margin-bottom: 1rem;
@@ -109,6 +110,44 @@ body {
 .panel-section h3 {
   margin: 0 0 0.25rem;
   font-size: 0.9rem;
+}
+
+.panel-subsection {
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.panel-subsection h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+}
+
+.inline-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.25rem;
+}
+
+.inline-number-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.inline-number-row input[type="number"] {
+  width: 4rem;
+}
+
+.inline-number-row .suffix {
+  font-size: 0.8rem;
+  color: #6b7280;
 }
 
 .primary {
@@ -132,16 +171,22 @@ body {
   font-size: 0.8rem;
 }
 
-#hintOverlay {
-  position: absolute;
-  bottom: 0.75rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15,23,42,0.9);
-  color: #fff;
-  font-size: 0.75rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
+.inline-node-editor {
+  position: fixed;
+  z-index: 20;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.75rem;
+  border: 2px solid #2563eb;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.25);
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: none;
+  outline: none;
+}
+
+.small-note {
+  font-size: 0.78rem;
+  color: #6b7280;
 }
 
 @media (max-width: 900px) {

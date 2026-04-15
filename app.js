@@ -24,10 +24,8 @@
   const connectorStyleSelect = document.getElementById("connectorStyleSelect");
   const layoutModeSelect = document.getElementById("layoutModeSelect");
   const treeDirectionSelect = document.getElementById("treeDirectionSelect");
-  const treeColorSchemeSelect = document.getElementById("treeColorSchemeSelect");
   const autoLayoutToggle = document.getElementById("autoLayoutToggle");
   const autoLayoutIntervalInput = document.getElementById("autoLayoutIntervalInput");
-  const applyTreeColorsBtn = document.getElementById("applyTreeColorsBtn");
   const applyLayoutBtn = document.getElementById("applyLayoutBtn");
 
   const nodeTextInput = document.getElementById("nodeTextInput");
@@ -1005,7 +1003,7 @@
     };
   }
 
-  // Layout & tree colours -------------------------------------------------
+  // Layout ---------------------------------------------------------------
 
   function computeTreeDepths() {
     if (!state.nodes.length) return { root: null, maxDepth: 0 };
@@ -1025,29 +1023,6 @@
     }
     dfs(root, 0);
     return { root, maxDepth };
-  }
-
-  function applyTreeHeadingColours() {
-    if (!state.nodes.length) return;
-    const scheme = treeColorSchemeSelect.value;
-    if (scheme !== "headings") return;
-
-    const { maxDepth } = computeTreeDepths();
-    const fillPalette = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd"];
-    const borderPalette = ["#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa"];
-    const textPalette = ["#ffffff", "#ffffff", "#0f172a", "#0f172a", "#0f172a"];
-
-    pushHistory();
-    for (const node of state.nodes) {
-      const d = typeof node._depth === "number" ? node._depth : 0;
-      const idx = Math.min(d, fillPalette.length - 1);
-      node.fillColor = fillPalette[idx];
-      node.borderColor = borderPalette[idx];
-      node.textColor = textPalette[idx];
-      delete node._depth;
-      delete node._xIndex;
-    }
-    scheduleDraw();
   }
 
   function applyLayout(mode) {
@@ -1546,10 +1521,6 @@
 
   applyLayoutBtn.addEventListener("click", () => {
     applyLayout(layoutModeSelect.value);
-  });
-
-  applyTreeColorsBtn.addEventListener("click", () => {
-    applyTreeHeadingColours();
   });
 
   applyNodeStyleToAllBtn.addEventListener("click", () => {
