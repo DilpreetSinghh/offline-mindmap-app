@@ -28,9 +28,6 @@
   const autoLayoutIntervalInput = document.getElementById("autoLayoutIntervalInput");
   const applyLayoutBtn = document.getElementById("applyLayoutBtn");
 
-  const nodeTextInput = document.getElementById("nodeTextInput");
-  const updateTextBtn = document.getElementById("updateTextBtn");
-
   const exportFormatSelect = document.getElementById("exportFormatSelect");
   const qualitySelect = document.getElementById("qualitySelect");
   const sizePresetSelect = document.getElementById("sizePresetSelect");
@@ -187,8 +184,6 @@
     connectionColorInput.value = state.connectionColor || "#9ca3af";
     fontSizeInput.value = state.fontSize || 16;
     treeDirectionSelect.value = state.treeDirection || "top-down";
-    const selectedNode = getNodeById(state.selectedNodeId);
-    nodeTextInput.value = selectedNode ? selectedNode.text || "" : "";
   }
 
   function refreshTabBar() {
@@ -398,7 +393,6 @@
     state.nodes.push(node);
     state.connections.push({ from: parent.id, to: id });
     state.selectedNodeId = id;
-    nodeTextInput.value = node.text;
     scheduleDraw();
     openInlineEditor(node);
   }
@@ -426,7 +420,6 @@
       state.connections.push({ from: parent.id, to: id });
     }
     state.selectedNodeId = id;
-    nodeTextInput.value = newNode.text;
     scheduleDraw();
     openInlineEditor(newNode);
   }
@@ -460,7 +453,6 @@
       (c) => !descendants.has(c.from) && !descendants.has(c.to)
     );
     state.selectedNodeId = state.nodes.length ? state.nodes[0].id : null;
-    nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId).text : "";
     scheduleDraw();
   }
 
@@ -756,7 +748,6 @@
       isDraggingNode = true;
       dragNodeId = node.id;
       state.selectedNodeId = node.id;
-      nodeTextInput.value = node.text || "";
       showHandles = true;
       scheduleDraw();
     } else {
@@ -903,7 +894,6 @@
     if (applyChanges && node) {
       pushHistory();
       node.text = inlineEditor.value || "";
-      nodeTextInput.value = node.text;
       scheduleDraw();
     }
     inlineEditor.remove();
@@ -1548,14 +1538,6 @@
     resetAutoLayoutTimer();
   });
 
-  updateTextBtn.addEventListener("click", () => {
-    const node = getNodeById(state.selectedNodeId);
-    if (!node) return;
-    pushHistory();
-    node.text = nodeTextInput.value || "";
-    scheduleDraw();
-  });
-
   sizePresetSelect.addEventListener("change", () => {
     const custom = sizePresetSelect.value === "custom";
     customWidthInput.disabled = !custom;
@@ -1590,7 +1572,6 @@
       deleteSelectedNode();
     } else if (e.key === "Escape") {
       state.selectedNodeId = null;
-      nodeTextInput.value = "";
       scheduleDraw();
     }
   });
