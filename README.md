@@ -24,7 +24,7 @@ A fully offline, client-side mind-map web application that runs entirely in the 
 
 - Pure HTML/CSS/JavaScript bundle (no Node/SSR).
 - Canvas-based rendering for interactive editing and export.
-- [jsPDF](https://github.com/parallax/jsPDF) for client-side PDF generation using the exported canvas image.
+- [pdf-lib](https://github.com/Hopding/pdf-lib) for high-resolution client-side PDF generation using the exported canvas image.
 - `canvas.toBlob` + `URL.createObjectURL` for PNG/JPEG/HEIF downloads.
 
 ## Running locally

@@ -311,7 +311,7 @@
 
     const totalHeight = lines.length * lineHeight;
     let offsetY = y;
-    if (totalHeight < (NODE_RADIUS * 1.6 - fontSize)) {
+    if (totalHeight < NODE_RADIUS * 1.6 - fontSize) {
       offsetY = y + (NODE_RADIUS * 1.6 - totalHeight) / 2 - fontSize;
     }
     for (const line of lines) {
@@ -830,24 +830,50 @@
     const qualityFactor = getQualityFactor(qualityPreset);
     const sizePx = getSizePixels(sizePreset);
 
+    // Compute export canvas size with a cap so huge maps don't blow up memory
+    let targetWidth = sizePx.width * qualityScale;
+    let targetHeight = sizePx.height * qualityScale;
+    const maxDim = 10000;
+    const maxCurrentDim = Math.max(targetWidth, targetHeight);
+    if (maxCurrentDim > maxDim) {
+      const ratio = maxDim / maxCurrentDim;
+      targetWidth = Math.round(targetWidth * ratio);
+      targetHeight = Math.round(targetHeight * ratio);
+    }
+
     const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = sizePx.width * qualityScale;
-    exportCanvas.height = sizePx.height * qualityScale;
+    exportCanvas.width = targetWidth;
+    exportCanvas.height = targetHeight;
 
     drawToOffscreen(exportCanvas, true);
 
     const filenameBase = "mindmap-export-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 
     if (format === "pdf") {
-      const imgData = exportCanvas.toDataURL("image/png");
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({
-        orientation: sizePx.width >= sizePx.height ? "landscape" : "portrait",
-        unit: "pt",
-        format: [sizePx.width, sizePx.height],
-      });
-      pdf.addImage(imgData, "PNG", 0, 0, sizePx.width, sizePx.height);
-      const blob = pdf.output("blob");
+      if (!window.PDFLib || !PDFLib.PDFDocument) {
+        alert("PDF library failed to load. Please check your network connection and try again.");
+        return;
+      }
+      const { PDFDocument } = PDFLib;
+      const pngDataUrl = exportCanvas.toDataURL("image/png");
+      const pdfDoc = await PDFDocument.create();
+      const pngImage = await pdfDoc.embedPng(pngDataUrl);
+      const pngDims = pngImage.scale(1);
+
+      const page = pdfDoc.addPage([sizePx.width, sizePx.height]);
+      const pageWidth = page.getWidth();
+      const pageHeight = page.getHeight();
+
+      const scale = Math.min(pageWidth / pngDims.width, pageHeight / pngDims.height);
+      const imgWidth = pngDims.width * scale;
+      const imgHeight = pngDims.height * scale;
+      const x = (pageWidth - imgWidth) / 2;
+      const y = (pageHeight - imgHeight) / 2;
+
+      page.drawImage(pngImage, { x, y, width: imgWidth, height: imgHeight });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: "application/pdf" });
       triggerDownloadFromBlob(blob, filenameBase + ".pdf");
       return;
     }
