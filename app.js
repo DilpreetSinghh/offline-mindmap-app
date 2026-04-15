@@ -59,6 +59,7 @@
 
   // Hover state for Freeform-style handles
   let hoverNodeId = null;
+  let hoverHandleDirection = null;
 
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -116,6 +117,13 @@
     state.panY = canvas.height / (2 * window.devicePixelRatio);
     state.scale = 1;
     draw();
+    // Immediately allow typing into the root node on new maps
+    setTimeout(() => {
+      const rootNode = getNodeById("root");
+      if (rootNode) {
+        openInlineEditor(rootNode);
+      }
+    }, 0);
   }
 
   function getNodeById(id) {
@@ -126,19 +134,35 @@
     const radius = NODE_RADIUS;
     const rx = radius * 1.3;
     const ry = radius * 0.8;
+    const cornerOffsetX = rx + HANDLE_GAP;
+    const cornerOffsetY = ry + HANDLE_GAP;
     return {
       top: { x: node.x, y: node.y - ry - HANDLE_GAP },
       bottom: { x: node.x, y: node.y + ry + HANDLE_GAP },
       left: { x: node.x - rx - HANDLE_GAP, y: node.y },
       right: { x: node.x + rx + HANDLE_GAP, y: node.y },
+      topLeft: { x: node.x - cornerOffsetX, y: node.y - cornerOffsetY },
+      topRight: { x: node.x + cornerOffsetX, y: node.y - cornerOffsetY },
+      bottomLeft: { x: node.x - cornerOffsetX, y: node.y + cornerOffsetY },
+      bottomRight: { x: node.x + cornerOffsetX, y: node.y + cornerOffsetY },
     };
   }
 
   function getHandleDirectionAt(node, wx, wy) {
     const centres = getHandleCenters(node);
     const half = HANDLE_SIZE / 2;
-    for (const dir of ["top", "right", "bottom", "left"]) {
+    for (const dir of [
+      "top",
+      "right",
+      "bottom",
+      "left",
+      "topRight",
+      "bottomRight",
+      "bottomLeft",
+      "topLeft",
+    ]) {
       const c = centres[dir];
+      if (!c) continue;
       if (Math.abs(wx - c.x) <= half && Math.abs(wy - c.y) <= half) {
         return dir;
       }
@@ -179,6 +203,18 @@
     } else if (direction === "bottom") {
       x = parent.x;
       y = parent.y + distance;
+    } else if (direction === "topRight") {
+      x = parent.x + distance;
+      y = parent.y - distance;
+    } else if (direction === "bottomRight") {
+      x = parent.x + distance;
+      y = parent.y + distance;
+    } else if (direction === "bottomLeft") {
+      x = parent.x - distance;
+      y = parent.y + distance;
+    } else if (direction === "topLeft") {
+      x = parent.x - distance;
+      y = parent.y - distance;
     } else {
       const angle = Math.random() * Math.PI * 2;
       const radialDistance = 180;
@@ -232,6 +268,7 @@
   function addNode() {
     if (!state.nodes.length) {
       createInitialMap();
+      return;
     }
     const parent = getNodeById(state.selectedNodeId) || state.nodes[0];
     addChildNode(parent);
@@ -365,38 +402,35 @@
 
   function drawHandles(ctx, node) {
     const centres = getHandleCenters(node);
-    for (const dir of ["top", "right", "bottom", "left"]) {
+    const dirs = [
+      "top",
+      "topRight",
+      "right",
+      "bottomRight",
+      "bottom",
+      "bottomLeft",
+      "left",
+      "topLeft",
+    ];
+    for (const dir of dirs) {
       const c = centres[dir];
-      drawArrowHandle(ctx, c.x, c.y, dir);
+      if (!c) continue;
+      const dimmed = hoverHandleDirection && hoverHandleDirection !== dir;
+      drawHandleCircle(ctx, c.x, c.y, dimmed);
     }
   }
 
-  function drawArrowHandle(ctx, cx, cy, direction) {
-    const size = HANDLE_SIZE;
+  function drawHandleCircle(ctx, cx, cy, dimmed) {
+    const r = HANDLE_SIZE / 2;
     ctx.save();
     ctx.beginPath();
-    if (direction === "right") {
-      ctx.moveTo(cx - size / 2, cy - size / 2);
-      ctx.lineTo(cx + size / 2, cy);
-      ctx.lineTo(cx - size / 2, cy + size / 2);
-    } else if (direction === "left") {
-      ctx.moveTo(cx + size / 2, cy - size / 2);
-      ctx.lineTo(cx - size / 2, cy);
-      ctx.lineTo(cx + size / 2, cy + size / 2);
-    } else if (direction === "top") {
-      ctx.moveTo(cx - size / 2, cy + size / 2);
-      ctx.lineTo(cx, cy - size / 2);
-      ctx.lineTo(cx + size / 2, cy + size / 2);
-    } else if (direction === "bottom") {
-      ctx.moveTo(cx - size / 2, cy - size / 2);
-      ctx.lineTo(cx, cy + size / 2);
-      ctx.lineTo(cx + size / 2, cy - size / 2);
-    }
-    ctx.closePath();
-    ctx.fillStyle = "#2563eb";
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = dimmed ? "rgba(37,99,235,0.25)" : "rgba(37,99,235,0.9)";
     ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "#1d4ed8";
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = dimmed
+      ? "rgba(37,99,235,0.35)"
+      : "rgba(37,99,235,0.95)";
     ctx.stroke();
     ctx.restore();
   }
@@ -543,8 +577,9 @@
     const x = clientX - rect.left;
     const y = clientY - rect.top;
 
-    // Update hover state for handles, keeping them visible when hovering node or handles
     const world = screenToWorld(x, y);
+
+    // Update hover state for nodes and handles
     let nodeForHover = findNodeAt(x, y);
     if (!nodeForHover && hoverNodeId) {
       const existing = getNodeById(hoverNodeId);
@@ -552,9 +587,25 @@
         nodeForHover = existing;
       }
     }
+
+    const candidateForHandles = nodeForHover || (hoverNodeId ? getNodeById(hoverNodeId) : null);
+    const prevHoverDir = hoverHandleDirection;
+    let newHoverDir = null;
+    if (candidateForHandles) {
+      newHoverDir = getHandleDirectionAt(candidateForHandles, world.x, world.y);
+    }
+
     const newHoverId = nodeForHover ? nodeForHover.id : null;
+    let needsRedraw = false;
     if (newHoverId !== hoverNodeId) {
       hoverNodeId = newHoverId;
+      needsRedraw = true;
+    }
+    if (newHoverDir !== prevHoverDir) {
+      hoverHandleDirection = newHoverDir;
+      needsRedraw = true;
+    }
+    if (needsRedraw) {
       draw();
     }
 
@@ -619,8 +670,11 @@
     editor.style.height = `${rectHeight}px`;
 
     document.body.appendChild(editor);
-    editor.focus();
-    editor.select();
+    // Defer focus very slightly to avoid race conditions on some browsers
+    requestAnimationFrame(() => {
+      editor.focus();
+      editor.select();
+    });
 
     inlineEditor = editor;
     editingNodeId = node.id;
