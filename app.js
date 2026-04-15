@@ -24,6 +24,8 @@
   const connectorStyleSelect = document.getElementById("connectorStyleSelect");
   const layoutModeSelect = document.getElementById("layoutModeSelect");
   const treeDirectionSelect = document.getElementById("treeDirectionSelect");
+  const treeColorSchemeSelect = document.getElementById("treeColorSchemeSelect");
+  const applyTreeColorsBtn = document.getElementById("applyTreeColorsBtn");
   const applyLayoutBtn = document.getElementById("applyLayoutBtn");
 
   const nodeTextInput = document.getElementById("nodeTextInput");
@@ -37,9 +39,15 @@
   const exportBtn = document.getElementById("exportBtn");
 
   const mapSelect = document.getElementById("mapSelect");
+  const tabBar = document.getElementById("tabBar");
 
   const STORAGE_KEY = "offline-mindmap-maps-v1";
 
+  // Tabs: each tab keeps its own state object and optional storage id
+  let tabs = [];
+  let activeTabIndex = -1;
+
+  // Editing state for currently active tab
   let state = {
     nodes: [],
     connections: [],
@@ -56,6 +64,7 @@
     treeDirection: "top-down",
   };
 
+  // Undo history shared per tab (cleared when switching tabs)
   let history = [];
   let future = [];
 
@@ -94,7 +103,14 @@
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();
 
+  function getActiveTab() {
+    if (activeTabIndex < 0 || activeTabIndex >= tabs.length) return null;
+    return tabs[activeTabIndex];
+  }
+
   function pushHistory() {
+    const tab = getActiveTab();
+    if (!tab) return;
     history.push(JSON.stringify(state));
     if (history.length > 100) history.shift();
     future = [];
@@ -102,6 +118,9 @@
 
   function restoreStateFrom(serialised) {
     state = JSON.parse(serialised);
+    const tab = getActiveTab();
+    if (tab) tab.state = state;
+    syncInputsFromState();
     scheduleDraw();
   }
 
@@ -140,6 +159,7 @@
     state.panX = canvas.width / (2 * window.devicePixelRatio);
     state.panY = canvas.height / (2 * window.devicePixelRatio);
     state.scale = 1;
+    syncInputsFromState();
     scheduleDraw();
     // Immediately allow typing into the root node on new maps
     setTimeout(() => {
@@ -153,6 +173,102 @@
   function getNodeById(id) {
     return state.nodes.find((n) => n.id === id) || null;
   }
+
+  // Tabs ------------------------------------------------------------------
+
+  function syncInputsFromState() {
+    nodeBorderColorInput.value = state.nodeBorderColor || "#e5e7eb";
+    nodeFillColorInput.value = state.nodeFillColor || "#facc15";
+    nodeTextColorInput.value = state.nodeTextColor || "#111827";
+    connectionColorInput.value = state.connectionColor || "#9ca3af";
+    fontSizeInput.value = state.fontSize || 16;
+    treeDirectionSelect.value = state.treeDirection || "top-down";
+    const selectedNode = getNodeById(state.selectedNodeId);
+    nodeTextInput.value = selectedNode ? selectedNode.text || "" : "";
+  }
+
+  function refreshTabBar() {
+    tabBar.innerHTML = "";
+    tabs.forEach((tab, index) => {
+      const btn = document.createElement("button");
+      btn.className = "tab" + (index === activeTabIndex ? " active" : "");
+      const title = document.createElement("span");
+      title.textContent = tab.name || "Untitled";
+      btn.appendChild(title);
+      if (tabs.length > 1) {
+        const close = document.createElement("span");
+        close.textContent = "×";
+        close.className = "tab-close";
+        close.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closeTab(index);
+        });
+        btn.appendChild(close);
+      }
+      btn.addEventListener("click", () => {
+        if (index !== activeTabIndex) {
+          setActiveTab(index);
+        }
+      });
+      tabBar.appendChild(btn);
+    });
+  }
+
+  function setActiveTab(index) {
+    if (index < 0 || index >= tabs.length) return;
+    activeTabIndex = index;
+    const tab = tabs[index];
+    state = tab.state;
+    history = [];
+    future = [];
+    syncInputsFromState();
+    refreshTabBar();
+    scheduleDraw();
+  }
+
+  function closeTab(index) {
+    if (index < 0 || index >= tabs.length) return;
+    tabs.splice(index, 1);
+    if (!tabs.length) {
+      createNewTab("Untitled 1", null, true);
+      return;
+    }
+    if (activeTabIndex >= tabs.length) {
+      activeTabIndex = tabs.length - 1;
+    }
+    const tab = tabs[activeTabIndex];
+    state = tab.state;
+    history = [];
+    future = [];
+    syncInputsFromState();
+    refreshTabBar();
+    scheduleDraw();
+  }
+
+  function createNewTab(name, id, initial) {
+    state = {
+      nodes: [],
+      connections: [],
+      selectedNodeId: null,
+      panX: canvas.width / (2 * window.devicePixelRatio),
+      panY: canvas.height / (2 * window.devicePixelRatio),
+      scale: 1,
+      connectorStyle: connectorStyleSelect.value,
+      nodeBorderColor: nodeBorderColorInput.value,
+      nodeFillColor: nodeFillColorInput.value,
+      nodeTextColor: nodeTextColorInput.value,
+      connectionColor: connectionColorInput.value,
+      fontSize: parseInt(fontSizeInput.value, 10) || 16,
+      treeDirection: treeDirectionSelect.value,
+    };
+    createInitialMap();
+    const tab = { id: id || null, name: name || "Untitled", state };
+    tabs.push(tab);
+    activeTabIndex = tabs.length - 1;
+    refreshTabBar();
+  }
+
+  // Handles & drawing -----------------------------------------------------
 
   function getHandleCenters(node) {
     const radius = NODE_RADIUS;
@@ -362,7 +478,7 @@
 
     ctx.setLineDash([]);
 
-    // Nodes (Miro/Freeform-like sticky notes)
+    // Nodes
     for (const node of state.nodes) {
       const isSelected = node.id === state.selectedNodeId;
       const isHovered = node.id === hoverNodeId;
@@ -408,7 +524,6 @@
         fSize
       );
 
-      // Freeform-style connection handles when hovered or selected
       if (showHandles && (isHovered || isSelected)) {
         drawHandles(ctx, node);
       }
@@ -554,7 +669,8 @@
     return null;
   }
 
-  // Pointer interactions
+  // Pointer interactions --------------------------------------------------
+
   let isPanning = false;
   let isDraggingNode = false;
   let dragNodeId = null;
@@ -614,7 +730,6 @@
     lastY = y;
 
     const world = screenToWorld(x, y);
-    // Check if clicking on a Freeform-style handle first
     const handle = findHandleAt(world.x, world.y);
     if (handle && button === 0) {
       showHandles = true;
@@ -633,7 +748,6 @@
       scheduleDraw();
     } else {
       isPanning = true;
-      // hide arrows when clicking on blank background
       hoverNodeId = null;
       hoverHandleDirection = null;
       showHandles = false;
@@ -648,7 +762,6 @@
 
     const world = screenToWorld(x, y);
 
-    // Update hover state for nodes and handles
     let nodeForHover = findNodeAt(x, y);
     if (!nodeForHover && hoverNodeId) {
       const existing = getNodeById(hoverNodeId);
@@ -717,7 +830,8 @@
     dragNodeId = null;
   }
 
-  // Inline editing on double-click
+  // Inline editing --------------------------------------------------------
+
   canvas.addEventListener("dblclick", (e) => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -745,7 +859,6 @@
     editor.style.height = `${rectHeight}px`;
 
     document.body.appendChild(editor);
-    // Defer focus very slightly to avoid race conditions on some browsers
     requestAnimationFrame(() => {
       editor.focus();
       editor.select();
@@ -785,7 +898,8 @@
     editingNodeId = null;
   }
 
-  // Zoom
+  // Zoom ------------------------------------------------------------------
+
   canvas.addEventListener(
     "wheel",
     (e) => {
@@ -876,6 +990,51 @@
     };
   }
 
+  // Layout & tree colours -------------------------------------------------
+
+  function computeTreeDepths() {
+    if (!state.nodes.length) return { root: null, maxDepth: 0 };
+    const root = state.nodes.find((n) => !n.parentId) || state.nodes[0];
+    const childMap = {};
+    for (const node of state.nodes) {
+      if (!node.parentId) continue;
+      if (!childMap[node.parentId]) childMap[node.parentId] = [];
+      childMap[node.parentId].push(node);
+    }
+    let maxDepth = 0;
+    function dfs(node, depth) {
+      node._depth = depth;
+      if (depth > maxDepth) maxDepth = depth;
+      const children = childMap[node.id] || [];
+      for (const child of children) dfs(child, depth + 1);
+    }
+    dfs(root, 0);
+    return { root, maxDepth };
+  }
+
+  function applyTreeHeadingColours() {
+    if (!state.nodes.length) return;
+    const scheme = treeColorSchemeSelect.value;
+    if (scheme !== "headings") return;
+
+    const { maxDepth } = computeTreeDepths();
+    const fillPalette = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd"];
+    const borderPalette = ["#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa"];
+    const textPalette = ["#ffffff", "#ffffff", "#0f172a", "#0f172a", "#0f172a"];
+
+    pushHistory();
+    for (const node of state.nodes) {
+      const d = typeof node._depth === "number" ? node._depth : 0;
+      const idx = Math.min(d, fillPalette.length - 1);
+      node.fillColor = fillPalette[idx];
+      node.borderColor = borderPalette[idx];
+      node.textColor = textPalette[idx];
+      delete node._depth;
+      delete node._xIndex;
+    }
+    scheduleDraw();
+  }
+
   function applyLayout(mode) {
     if (!state.nodes.length) return;
     pushHistory();
@@ -895,33 +1054,30 @@
         child.y = centreY + Math.sin(step * index) * radius;
       });
     } else if (mode === "tree") {
-      // Build adjacency map for full tree
+      const { root: treeRoot } = computeTreeDepths();
+      const rootNode = treeRoot || root;
+      const rootDepth = rootNode._depth || 0;
       const childMap = {};
       for (const node of state.nodes) {
         if (!node.parentId) continue;
         if (!childMap[node.parentId]) childMap[node.parentId] = [];
         childMap[node.parentId].push(node);
       }
-
-      // DFS assigning depth and xIndex using a tidy-tree style pass
       let indexCounter = 0;
-      function dfs(node, depth) {
+      function dfsIndex(node) {
         const children = childMap[node.id] || [];
-        node._depth = depth;
         if (children.length === 0) {
           node._xIndex = indexCounter++;
         } else {
-          children.forEach((child) => dfs(child, depth + 1));
+          children.forEach((child) => dfsIndex(child));
           const first = children[0]._xIndex;
           const last = children[children.length - 1]._xIndex;
           node._xIndex = (first + last) / 2;
         }
       }
+      dfsIndex(rootNode);
 
-      dfs(root, 0);
-
-      const rootDepth = root._depth || 0;
-      const rootIndex = root._xIndex || 0;
+      const rootIndex = rootNode._xIndex || 0;
       const gapX = 220;
       const gapY = 160;
       const direction = state.treeDirection || "top-down";
@@ -961,7 +1117,6 @@
       });
     }
 
-    // Simple placement for deeper descendants in non-tree layouts
     if (mode !== "tree") {
       others.forEach((node) => {
         const parent = getNodeById(node.parentId);
@@ -1090,12 +1245,10 @@
       const textColor = node.textColor || state.nodeTextColor;
 
       context.save();
-      // Shadow
       context.fillStyle = "rgba(15,23,42,0.08)";
       drawRoundedRect(context, node.x - rx + 4, node.y - ry + 6, rx * 2, ry * 2, 14);
       context.fill();
 
-      // Card
       drawRoundedRect(context, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
       context.fillStyle = fillColor;
       context.globalAlpha = 0.96;
@@ -1105,7 +1258,6 @@
       context.lineWidth = isSelected ? 3 : 1.5;
       context.stroke();
 
-      // Text
       context.fillStyle = textColor;
       const fSize = node.fontSize || state.fontSize;
       context.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
@@ -1148,7 +1300,6 @@
     const qualityFactor = getQualityFactor(qualityPreset);
     const sizePx = getSizePixels(sizePreset);
 
-    // Compute export canvas size with a cap so huge maps don't blow up memory
     let targetWidth = sizePx.width * qualityScale;
     let targetHeight = sizePx.height * qualityScale;
     const maxDim = 10000;
@@ -1225,6 +1376,8 @@
     );
   }
 
+  // Storage & maps --------------------------------------------------------
+
   function loadMapsFromStorage() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -1264,14 +1417,32 @@
   }
 
   function saveCurrentMap() {
-    const name = prompt("Save map as (name):", "My mind map");
-    if (!name) return;
+    const tab = getActiveTab();
+    if (!tab) return;
     const maps = loadMapsFromStorage();
-    const id = "map-" + Date.now();
-    maps.push({ id, name, data: state });
+    let name = tab.name || "My mind map";
+    name = prompt("Save map as (name):", name) || name;
+    tab.name = name;
+
+    if (tab.id) {
+      const existing = maps.find((m) => m.id === tab.id);
+      if (existing) {
+        existing.name = name;
+        existing.data = state;
+      } else {
+        maps.push({ id: tab.id, name, data: state });
+      }
+    } else {
+      const id = "map-" + Date.now();
+      tab.id = id;
+      maps.push({ id, name, data: state });
+    }
     saveMapsToStorage(maps);
     refreshMapSelect();
-    mapSelect.value = id;
+    refreshTabBar();
+    if (tab.id) {
+      mapSelect.value = tab.id;
+    }
   }
 
   function openSelectedMap() {
@@ -1280,40 +1451,31 @@
     const maps = loadMapsFromStorage();
     const match = maps.find((m) => m.id === id);
     if (!match) return;
-    pushHistory();
+
     state = match.data;
-    nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId)?.text || "" : "";
+    const name = match.name || "Untitled";
+    const existingIndex = tabs.findIndex((t) => t.id === id);
+    if (existingIndex >= 0) {
+      tabs[existingIndex].state = state;
+      activeTabIndex = existingIndex;
+    } else {
+      const tab = { id, name, state };
+      tabs.push(tab);
+      activeTabIndex = tabs.length - 1;
+    }
+    history = [];
+    future = [];
+    syncInputsFromState();
+    refreshTabBar();
     scheduleDraw();
   }
 
   function newMap() {
-    pushHistory();
-    state = {
-      nodes: [],
-      connections: [],
-      selectedNodeId: null,
-      panX: canvas.width / (2 * window.devicePixelRatio),
-      panY: canvas.height / (2 * window.devicePixelRatio),
-      scale: 1,
-      connectorStyle: connectorStyleSelect.value,
-      nodeBorderColor: nodeBorderColorInput.value,
-      nodeFillColor: nodeFillColorInput.value,
-      nodeTextColor: nodeTextColorInput.value,
-      connectionColor: connectionColorInput.value,
-      fontSize: parseInt(fontSizeInput.value, 10) || 16,
-      treeDirection: treeDirectionSelect.value,
-    };
-    createInitialMap();
+    const label = `Untitled ${tabs.length + 1}`;
+    createNewTab(label, null, false);
   }
 
-  newMapBtn.addEventListener("click", newMap);
-  saveMapBtn.addEventListener("click", saveCurrentMap);
-  openMapBtn.addEventListener("click", openSelectedMap);
-  undoBtn.addEventListener("click", undo);
-  redoBtn.addEventListener("click", redo);
-  addNodeBtn.addEventListener("click", addNode);
-  deleteNodeBtn.addEventListener("click", deleteSelectedNode);
-  autoFitBtn.addEventListener("click", autoFit);
+  // Node style & layout events -------------------------------------------
 
   function markNodeStyleDirty() {
     applyNodeStyleToAllBtn.style.display = "inline-block";
@@ -1370,6 +1532,10 @@
     applyLayout(layoutModeSelect.value);
   });
 
+  applyTreeColorsBtn.addEventListener("click", () => {
+    applyTreeHeadingColours();
+  });
+
   applyNodeStyleToAllBtn.addEventListener("click", () => {
     pushHistory();
     for (const node of state.nodes) {
@@ -1398,11 +1564,10 @@
 
   exportBtn.addEventListener("click", exportMap);
 
-  // Keyboard shortcuts (Miro-like): Enter = sibling, Tab = child, Delete = delete node, Ctrl/Cmd+Z undo/redo
+  // Keyboard shortcuts: Enter= sibling, Tab=child, Delete=delete, Ctrl/Cmd+Z undo/redo
   document.addEventListener("keydown", (e) => {
-    if (inlineEditor) return; // let editor handle keys
+    if (inlineEditor) return;
 
-    // Undo / Redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       if (e.shiftKey) {
@@ -1431,6 +1596,19 @@
     }
   });
 
+  // Toolbar events --------------------------------------------------------
+
+  newMapBtn.addEventListener("click", newMap);
+  saveMapBtn.addEventListener("click", saveCurrentMap);
+  openMapBtn.addEventListener("click", openSelectedMap);
+  undoBtn.addEventListener("click", undo);
+  redoBtn.addEventListener("click", redo);
+  addNodeBtn.addEventListener("click", addNode);
+  deleteNodeBtn.addEventListener("click", deleteSelectedNode);
+  autoFitBtn.addEventListener("click", autoFit);
+
+  // Initialisation --------------------------------------------------------
+
   refreshMapSelect();
-  createInitialMap();
+  createNewTab("Untitled 1", null, true);
 })();

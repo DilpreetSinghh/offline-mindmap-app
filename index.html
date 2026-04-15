@@ -12,9 +12,9 @@
   <div id="app">
     <header class="toolbar">
       <div class="toolbar-left">
-        <button id="newMapBtn">New</button>
+        <button id="newMapBtn">New tab</button>
         <select id="mapSelect"></select>
-        <button id="openMapBtn">Open</button>
+        <button id="openMapBtn">Open in new tab</button>
         <button id="saveMapBtn">Save</button>
         <button id="undoBtn">Undo</button>
         <button id="redoBtn">Redo</button>
@@ -25,6 +25,8 @@
         <button id="autoFitBtn">Auto-fit</button>
       </div>
     </header>
+
+    <div id="tabBar" class="tab-bar" aria-label="Open mind maps"></div>
 
     <main class="main-layout">
       <section class="side-panel" aria-label="Settings">
@@ -68,7 +70,7 @@
             <select id="layoutModeSelect">
               <option value="free">Free (manual)</option>
               <option value="radial">Radial</option>
-              <option value="tree">Tree</option>
+              <option value="tree" selected>Tree</option>
               <option value="flow">Left-to-right</option>
             </select>
           </label>
@@ -81,6 +83,17 @@
               <option value="bottom-up">Bottom to top</option>
             </select>
           </label>
+          <div class="panel-section">
+            <h3>Advanced</h3>
+            <label>
+              Tree colour scheme
+              <select id="treeColorSchemeSelect">
+                <option value="none">None</option>
+                <option value="headings">Headings-style colours</option>
+              </select>
+            </label>
+            <button id="applyTreeColorsBtn" class="secondary small">Apply tree colours</button>
+          </div>
           <button id="applyLayoutBtn">Apply layout</button>
         </div>
 
