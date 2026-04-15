@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline Mind Map</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- jsPDF for client-side PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-/F2YlzbwQ6vurIWBLL8GMDIS9ZhDJW60Trw7P3cu6UytzszbmWzxubUoil58x2oyS9MhUlCT3VkOITkkpFm0sw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <button id="newMapBtn">New</button>
+        <select id="mapSelect"></select>
+        <button id="openMapBtn">Open</button>
+        <button id="saveMapBtn">Save</button>
+        <button id="undoBtn">Undo</button>
+        <button id="redoBtn">Redo</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="addNodeBtn">Add node</button>
+        <button id="deleteNodeBtn">Delete node</button>
+        <button id="autoFitBtn">Auto-fit</button>
+      </div>
+    </header>
+
+    <main class="main-layout">
+      <section class="side-panel" aria-label="Settings">
+        <h2>Settings</h2>
+        <div class="panel-section">
+          <h3>Node style</h3>
+          <label>
+            Colour
+            <input type="color" id="nodeColorInput" value="#1976d2" />
+          </label>
+          <label>
+            Font size (px)
+            <input type="number" id="fontSizeInput" min="8" max="36" value="16" />
+          </label>
+          <label>
+            Connector style
+            <select id="connectorStyleSelect">
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="panel-section">
+          <h3>Layout</h3>
+          <label>
+            Layout mode
+            <select id="layoutModeSelect">
+              <option value="free">Free (manual)</option>
+              <option value="radial">Radial</option>
+              <option value="tree">Tree</option>
+              <option value="flow">Left-to-right</option>
+            </select>
+          </label>
+          <button id="applyLayoutBtn">Apply layout</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>Node text</h3>
+          <textarea id="nodeTextInput" rows="4" placeholder="Type node text here..."></textarea>
+          <button id="updateTextBtn">Update text</button>
+        </div>
+      </section>
+
+      <section class="canvas-wrapper" aria-label="Mind map canvas">
+        <canvas id="mindmapCanvas"></canvas>
+        <div id="hintOverlay">Drag nodes to rearrange. Drag background to pan. Scroll or pinch to zoom.</div>
+      </section>
+
+      <section class="side-panel" aria-label="Export">
+        <h2>Export</h2>
+        <div class="panel-section">
+          <h3>Format</h3>
+          <label>
+            Type
+            <select id="exportFormatSelect">
+              <option value="pdf">PDF</option>
+              <option value="png">PNG</option>
+              <option value="jpeg">JPEG</option>
+              <option value="heif">HEIF</option>
+            </select>
+          </label>
+        </div>
+        <div class="panel-section">
+          <h3>Quality</h3>
+          <label>
+            Preset
+            <select id="qualitySelect">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+          </label>
+        </div>
+        <div class="panel-section">
+          <h3>Output size</h3>
+          <label>
+            Preset
+            <select id="sizePresetSelect">
+              <option value="screen">Screen size</option>
+              <option value="a4">A4</option>
+              <option value="a3">A3</option>
+              <option value="custom">Custom (px)</option>
+            </select>
+          </label>
+          <div class="custom-size-row">
+            <label>
+              Width
+              <input type="number" id="customWidthInput" min="200" value="1920" />
+            </label>
+            <label>
+              Height
+              <input type="number" id="customHeightInput" min="200" value="1080" />
+            </label>
+          </div>
+        </div>
+        <div class="panel-section">
+          <button id="exportBtn" class="primary">Download</button>
+          <p class="small-note">
+            All exports are generated in your browser. Your maps never leave this device.
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
