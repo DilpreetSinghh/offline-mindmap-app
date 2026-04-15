@@ -216,6 +216,23 @@ input[type="color"] {
   color: #9ca3af;
 }
 
+.inline-number-row.auto-layout-row {
+  justify-content: space-between;
+}
+
+.inline-number-row.auto-layout-row .label-text {
+  font-size: 0.78rem;
+  color: #d1d5db;
+}
+
+.inline-number-row.auto-layout-row input[type="number"] {
+  max-width: 3.2rem;
+}
+
+.inline-number-row.auto-layout-row input[type="checkbox"] {
+  margin-left: 0.35rem;
+}
+
 .small-note {
   font-size: 0.72rem;
   color: #9ca3af;
