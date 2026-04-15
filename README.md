@@ -7,6 +7,9 @@ A fully offline, client-side mind-map web application that runs entirely in the 
 - Single-page application, works on desktop and mobile.
 - Canvas-based mind-map editor with:
   - Node creation, text editing, drag-and-drop.
+  - Miro-inspired sticky-note styling and whiteboard background.
+  - Double-click inline editing on nodes.
+  - Keyboard shortcuts: Tab for child node, Enter for sibling, Delete/Backspace to remove.
   - Panning and zooming (mouse wheel and pinch on touch).
   - Auto-fit to centre all nodes.
 - Local persistence using `localStorage` (no backend, no analytics, no accounts).

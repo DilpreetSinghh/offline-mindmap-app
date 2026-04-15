@@ -1,4 +1,4 @@
-// Simple offline mind-map editor
+// Offline mind-map editor with Miro-inspired design and interactions
 // All data lives in memory or browser storage. No network requests for user content.
 
 (function () {
@@ -42,7 +42,7 @@
     panY: 0,
     scale: 1,
     connectorStyle: "solid",
-    nodeColor: "#1976d2",
+    nodeColor: "#facc15", // soft sticky-note yellow
     fontSize: 16,
   };
 
@@ -50,6 +50,10 @@
   let future = [];
 
   const NODE_RADIUS = 60;
+
+  // Inline editor state
+  let inlineEditor = null;
+  let editingNodeId = null;
 
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -113,12 +117,10 @@
     return state.nodes.find((n) => n.id === id) || null;
   }
 
-  function addNode() {
-    if (!state.nodes.length) {
-      createInitialMap();
-    }
+  function addChildNode(parent) {
+    if (!parent) parent = state.nodes[0];
+    if (!parent) return;
     pushHistory();
-    const parent = getNodeById(state.selectedNodeId) || state.nodes[0];
     const id = "n" + Date.now();
     const angle = Math.random() * Math.PI * 2;
     const distance = 180;
@@ -129,14 +131,46 @@
       y: parent.y + Math.sin(angle) * distance,
       color: state.nodeColor,
       fontSize: state.fontSize,
-      parentId: parent ? parent.id : null,
+      parentId: parent.id,
     };
     state.nodes.push(node);
+    state.connections.push({ from: parent.id, to: id });
+    state.selectedNodeId = id;
+    nodeTextInput.value = node.text;
+    draw();
+  }
+
+  function addSiblingNode(node) {
+    if (!node) return;
+    const parent = node.parentId ? getNodeById(node.parentId) : null;
+    const base = parent || node;
+    pushHistory();
+    const id = "n" + Date.now();
+    const offsetY = 140;
+    const newNode = {
+      id,
+      text: "New node",
+      x: base.x,
+      y: node.y + offsetY,
+      color: state.nodeColor,
+      fontSize: state.fontSize,
+      parentId: parent ? parent.id : node.parentId,
+    };
+    state.nodes.push(newNode);
     if (parent) {
       state.connections.push({ from: parent.id, to: id });
     }
     state.selectedNodeId = id;
+    nodeTextInput.value = newNode.text;
     draw();
+  }
+
+  function addNode() {
+    if (!state.nodes.length) {
+      createInitialMap();
+    }
+    const parent = getNodeById(state.selectedNodeId) || state.nodes[0];
+    addChildNode(parent);
   }
 
   function deleteSelectedNode() {
@@ -159,6 +193,7 @@
       (c) => !descendants.has(c.from) && !descendants.has(c.to)
     );
     state.selectedNodeId = state.nodes.length ? state.nodes[0].id : null;
+    nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId).text : "";
     draw();
   }
 
@@ -176,6 +211,7 @@
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
+    // Connections
     for (const c of state.connections) {
       const from = getNodeById(c.from);
       const to = getNodeById(c.to);
@@ -195,26 +231,48 @@
 
     ctx.setLineDash([]);
 
+    // Nodes (Miro-like sticky notes)
     for (const node of state.nodes) {
       const isSelected = node.id === state.selectedNodeId;
-      ctx.beginPath();
+      ctx.save();
       const radius = NODE_RADIUS;
       const rx = radius * 1.3;
       const ry = radius * 0.8;
+
+      // Drop shadow
+      ctx.fillStyle = "rgba(15,23,42,0.08)";
+      drawRoundedRect(ctx, node.x - rx + 4, node.y - ry + 6, rx * 2, ry * 2, 14);
+      ctx.fill();
+
+      // Card
       drawRoundedRect(ctx, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
       ctx.fillStyle = node.color || state.nodeColor;
-      ctx.globalAlpha = isSelected ? 1.0 : 0.9;
+      ctx.globalAlpha = 0.96;
       ctx.fill();
       ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = isSelected ? "#fbbf24" : "#1f2937";
+      ctx.strokeStyle = isSelected ? "#2563eb" : "#e5e7eb";
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
-      ctx.fillStyle = "#f9fafb";
-      ctx.font = `${node.fontSize || state.fontSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      wrapText(ctx, node.text, node.x, node.y, rx * 1.6, node.fontSize * 1.2, node.fontSize);
+      // Text
+      ctx.fillStyle = "#111827";
+      const fSize = node.fontSize || state.fontSize;
+      ctx.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const textPaddingX = 14;
+      const textPaddingY = 10;
+      wrapText(
+        ctx,
+        node.text,
+        node.x - rx + textPaddingX,
+        node.y - ry + textPaddingY,
+        rx * 2 - textPaddingX * 2,
+        fSize * 1.2,
+        fSize
+      );
+
+      ctx.restore();
     }
 
     ctx.restore();
@@ -252,7 +310,10 @@
     if (current) lines.push(current);
 
     const totalHeight = lines.length * lineHeight;
-    let offsetY = y - totalHeight / 2 + fontSize / 2;
+    let offsetY = y;
+    if (totalHeight < (NODE_RADIUS * 1.6 - fontSize)) {
+      offsetY = y + (NODE_RADIUS * 1.6 - totalHeight) / 2 - fontSize;
+    }
     for (const line of lines) {
       ctx.fillText(line, x, offsetY);
       offsetY += lineHeight;
@@ -263,6 +324,12 @@
     const wx = (x - state.panX) / state.scale;
     const wy = (y - state.panY) / state.scale;
     return { x: wx, y: wy };
+  }
+
+  function worldToScreen(x, y) {
+    const sx = x * state.scale + state.panX;
+    const sy = y * state.scale + state.panY;
+    return { x: sx, y: sy };
   }
 
   function findNodeAt(canvasX, canvasY) {
@@ -283,6 +350,7 @@
     return null;
   }
 
+  // Pointer interactions
   let isPanning = false;
   let isDraggingNode = false;
   let dragNodeId = null;
@@ -301,24 +369,32 @@
     handlePointerUp();
   });
 
-  canvas.addEventListener("touchstart", (e) => {
-    if (e.touches.length === 1) {
-      const t = e.touches[0];
-      handlePointerDown(t.clientX, t.clientY, 0);
-    } else if (e.touches.length === 2) {
-      pinchStart(e);
-    }
-  }, { passive: false });
+  canvas.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        handlePointerDown(t.clientX, t.clientY, 0);
+      } else if (e.touches.length === 2) {
+        pinchStart(e);
+      }
+    },
+    { passive: false }
+  );
 
-  canvas.addEventListener("touchmove", (e) => {
-    if (e.touches.length === 1 && !pinch.active) {
-      const t = e.touches[0];
-      handlePointerMove(t.clientX, t.clientY);
-    } else if (e.touches.length === 2) {
-      pinchMove(e);
-    }
-    e.preventDefault();
-  }, { passive: false });
+  canvas.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches.length === 1 && !pinch.active) {
+        const t = e.touches[0];
+        handlePointerMove(t.clientX, t.clientY);
+      } else if (e.touches.length === 2) {
+        pinchMove(e);
+      }
+      e.preventDefault();
+    },
+    { passive: false }
+  );
 
   canvas.addEventListener("touchend", () => {
     handlePointerUp();
@@ -326,6 +402,7 @@
   });
 
   function handlePointerDown(clientX, clientY, button) {
+    closeInlineEditor(true);
     const rect = canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
@@ -376,22 +453,91 @@
     dragNodeId = null;
   }
 
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
+  // Inline editing on double-click
+  canvas.addEventListener("dblclick", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const delta = -e.deltaY || e.wheelDelta;
-    const zoomFactor = delta > 0 ? 1.1 : 0.9;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const node = findNodeAt(x, y);
+    if (!node) return;
+    state.selectedNodeId = node.id;
+    openInlineEditor(node);
+  });
 
-    const before = screenToWorld(mouseX, mouseY);
-    state.scale *= zoomFactor;
-    state.scale = Math.max(0.2, Math.min(4, state.scale));
-    const after = screenToWorld(mouseX, mouseY);
-    state.panX += (after.x - before.x) * state.scale;
-    state.panY += (after.y - before.y) * state.scale;
-    draw();
-  }, { passive: false });
+  function openInlineEditor(node) {
+    closeInlineEditor(false);
+    const { x, y } = worldToScreen(node.x, node.y);
+    const radius = NODE_RADIUS;
+    const rectWidth = radius * 2.6;
+    const rectHeight = radius * 1.6;
+
+    const editor = document.createElement("textarea");
+    editor.className = "inline-node-editor";
+    editor.value = node.text || "";
+    editor.style.left = `${canvas.getBoundingClientRect().left + x - rectWidth / 2}px`;
+    editor.style.top = `${canvas.getBoundingClientRect().top + y - rectHeight / 2}px`;
+    editor.style.width = `${rectWidth}px`;
+    editor.style.height = `${rectHeight}px`;
+
+    document.body.appendChild(editor);
+    editor.focus();
+    editor.select();
+
+    inlineEditor = editor;
+    editingNodeId = node.id;
+
+    editor.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        closeInlineEditor(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeInlineEditor(false);
+      }
+    });
+
+    editor.addEventListener("blur", () => {
+      if (inlineEditor) {
+        closeInlineEditor(true);
+      }
+    });
+  }
+
+  function closeInlineEditor(applyChanges) {
+    if (!inlineEditor) return;
+    const node = getNodeById(editingNodeId);
+    if (applyChanges && node) {
+      pushHistory();
+      node.text = inlineEditor.value || "";
+      nodeTextInput.value = node.text;
+      draw();
+    }
+    inlineEditor.remove();
+    inlineEditor = null;
+    editingNodeId = null;
+  }
+
+  // Zoom
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const delta = -e.deltaY || e.wheelDelta;
+      const zoomFactor = delta > 0 ? 1.1 : 0.9;
+
+      const before = screenToWorld(mouseX, mouseY);
+      state.scale *= zoomFactor;
+      state.scale = Math.max(0.2, Math.min(4, state.scale));
+      const after = screenToWorld(mouseX, mouseY);
+      state.panX += (after.x - before.x) * state.scale;
+      state.panY += (after.y - before.y) * state.scale;
+      draw();
+    },
+    { passive: false }
+  );
 
   const pinch = {
     active: false,
@@ -481,7 +627,7 @@
       });
     } else if (mode === "tree") {
       const levelGapY = 160;
-      const levelGapX = 200;
+      const levelGapX = 220;
       root.x = centreX;
       root.y = centreY;
       const rootChildren = children;
@@ -491,7 +637,7 @@
         child.y = centreY + levelGapY;
       });
     } else if (mode === "flow") {
-      const gapX = 220;
+      const gapX = 260;
       const gapY = 120;
       root.x = centreX;
       root.y = centreY;
@@ -503,6 +649,7 @@
       });
     }
 
+    // Simple placement for deeper descendants
     others.forEach((node) => {
       const parent = getNodeById(node.parentId);
       if (!parent) return;
@@ -623,21 +770,41 @@
       const radius = NODE_RADIUS;
       const rx = radius * 1.3;
       const ry = radius * 0.8;
+
+      context.save();
+      // Shadow
+      context.fillStyle = "rgba(15,23,42,0.08)";
+      drawRoundedRect(context, node.x - rx + 4, node.y - ry + 6, rx * 2, ry * 2, 14);
+      context.fill();
+
+      // Card
       drawRoundedRect(context, node.x - rx, node.y - ry, rx * 2, ry * 2, 14);
       context.fillStyle = node.color || state.nodeColor;
-      context.globalAlpha = isSelected ? 1.0 : 0.95;
+      context.globalAlpha = 0.96;
       context.fill();
       context.globalAlpha = 1.0;
-      context.strokeStyle = "#1f2937";
-      context.lineWidth = 1.5;
+      context.strokeStyle = isSelected ? "#2563eb" : "#e5e7eb";
+      context.lineWidth = isSelected ? 3 : 1.5;
       context.stroke();
 
-      context.fillStyle = "#f9fafb";
+      // Text
+      context.fillStyle = "#111827";
       const fSize = node.fontSize || state.fontSize;
       context.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      wrapText(context, node.text, node.x, node.y, rx * 1.6, fSize * 1.2, fSize);
+      context.textAlign = "left";
+      context.textBaseline = "top";
+      const textPaddingX = 14;
+      const textPaddingY = 10;
+      wrapText(
+        context,
+        node.text,
+        node.x - rx + textPaddingX,
+        node.y - ry + textPaddingY,
+        rx * 2 - textPaddingX * 2,
+        fSize * 1.2,
+        fSize
+      );
+      context.restore();
     }
   }
 
@@ -771,6 +938,7 @@
     if (!match) return;
     pushHistory();
     state = match.data;
+    nodeTextInput.value = state.selectedNodeId ? getNodeById(state.selectedNodeId)?.text || "" : "";
     draw();
   }
 
@@ -838,6 +1006,27 @@
   });
 
   exportBtn.addEventListener("click", exportMap);
+
+  // Keyboard shortcuts (Miro-like): Enter = sibling, Tab = child, Delete = delete node
+  document.addEventListener("keydown", (e) => {
+    if (inlineEditor) return; // let editor handle keys
+    const node = getNodeById(state.selectedNodeId);
+    if (!node) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      addChildNode(node);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      addSiblingNode(node);
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      deleteSelectedNode();
+    } else if (e.key === "Escape") {
+      state.selectedNodeId = null;
+      nodeTextInput.value = "";
+      draw();
+    }
+  });
 
   refreshMapSelect();
   createInitialMap();
