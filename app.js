@@ -1,4 +1,4 @@
-// Offline mind-map editor with Miro-inspired design and interactions
+// Offline mind-map editor with Miro/Freeform-inspired design and interactions
 // All data lives in memory or browser storage. No network requests for user content.
 
 (function () {
@@ -50,10 +50,15 @@
   let future = [];
 
   const NODE_RADIUS = 60;
+  const HANDLE_SIZE = 22;
+  const HANDLE_GAP = 12;
 
   // Inline editor state
   let inlineEditor = null;
   let editingNodeId = null;
+
+  // Hover state for Freeform-style handles
+  let hoverNodeId = null;
 
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -117,18 +122,75 @@
     return state.nodes.find((n) => n.id === id) || null;
   }
 
-  function addChildNode(parent) {
+  function getHandleCenters(node) {
+    const radius = NODE_RADIUS;
+    const rx = radius * 1.3;
+    const ry = radius * 0.8;
+    return {
+      top: { x: node.x, y: node.y - ry - HANDLE_GAP },
+      bottom: { x: node.x, y: node.y + ry + HANDLE_GAP },
+      left: { x: node.x - rx - HANDLE_GAP, y: node.y },
+      right: { x: node.x + rx + HANDLE_GAP, y: node.y },
+    };
+  }
+
+  function getHandleDirectionAt(node, wx, wy) {
+    const centres = getHandleCenters(node);
+    const half = HANDLE_SIZE / 2;
+    for (const dir of ["top", "right", "bottom", "left"]) {
+      const c = centres[dir];
+      if (Math.abs(wx - c.x) <= half && Math.abs(wy - c.y) <= half) {
+        return dir;
+      }
+    }
+    return null;
+  }
+
+  function findHandleAt(worldX, worldY) {
+    let candidate = hoverNodeId ? getNodeById(hoverNodeId) : null;
+    if (!candidate && state.selectedNodeId) {
+      candidate = getNodeById(state.selectedNodeId);
+    }
+    if (!candidate) return null;
+    const dir = getHandleDirectionAt(candidate, worldX, worldY);
+    if (!dir) return null;
+    return { node: candidate, direction: dir };
+  }
+
+  function addChildNode(parent, direction) {
     if (!parent) parent = state.nodes[0];
     if (!parent) return;
     pushHistory();
+
     const id = "n" + Date.now();
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 180;
+    const distance = 220;
+    let x;
+    let y;
+
+    if (direction === "right") {
+      x = parent.x + distance;
+      y = parent.y;
+    } else if (direction === "left") {
+      x = parent.x - distance;
+      y = parent.y;
+    } else if (direction === "top") {
+      x = parent.x;
+      y = parent.y - distance;
+    } else if (direction === "bottom") {
+      x = parent.x;
+      y = parent.y + distance;
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      const radialDistance = 180;
+      x = parent.x + Math.cos(angle) * radialDistance;
+      y = parent.y + Math.sin(angle) * radialDistance;
+    }
+
     const node = {
       id,
-      text: "New node",
-      x: parent.x + Math.cos(angle) * distance,
-      y: parent.y + Math.sin(angle) * distance,
+      text: "",
+      x,
+      y,
       color: state.nodeColor,
       fontSize: state.fontSize,
       parentId: parent.id,
@@ -138,6 +200,7 @@
     state.selectedNodeId = id;
     nodeTextInput.value = node.text;
     draw();
+    openInlineEditor(node);
   }
 
   function addSiblingNode(node) {
@@ -149,7 +212,7 @@
     const offsetY = 140;
     const newNode = {
       id,
-      text: "New node",
+      text: "",
       x: base.x,
       y: node.y + offsetY,
       color: state.nodeColor,
@@ -163,6 +226,7 @@
     state.selectedNodeId = id;
     nodeTextInput.value = newNode.text;
     draw();
+    openInlineEditor(newNode);
   }
 
   function addNode() {
@@ -231,9 +295,10 @@
 
     ctx.setLineDash([]);
 
-    // Nodes (Miro-like sticky notes)
+    // Nodes (Miro/Freeform-like sticky notes)
     for (const node of state.nodes) {
       const isSelected = node.id === state.selectedNodeId;
+      const isHovered = node.id === hoverNodeId;
       ctx.save();
       const radius = NODE_RADIUS;
       const rx = radius * 1.3;
@@ -272,6 +337,11 @@
         fSize
       );
 
+      // Freeform-style connection handles when hovered or selected
+      if (isHovered || isSelected) {
+        drawHandles(ctx, node);
+      }
+
       ctx.restore();
     }
 
@@ -291,6 +361,44 @@
     ctx.lineTo(x, y + r);
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
+  }
+
+  function drawHandles(ctx, node) {
+    const centres = getHandleCenters(node);
+    for (const dir of ["top", "right", "bottom", "left"]) {
+      const c = centres[dir];
+      drawArrowHandle(ctx, c.x, c.y, dir);
+    }
+  }
+
+  function drawArrowHandle(ctx, cx, cy, direction) {
+    const size = HANDLE_SIZE;
+    ctx.save();
+    ctx.beginPath();
+    if (direction === "right") {
+      ctx.moveTo(cx - size / 2, cy - size / 2);
+      ctx.lineTo(cx + size / 2, cy);
+      ctx.lineTo(cx - size / 2, cy + size / 2);
+    } else if (direction === "left") {
+      ctx.moveTo(cx + size / 2, cy - size / 2);
+      ctx.lineTo(cx - size / 2, cy);
+      ctx.lineTo(cx + size / 2, cy + size / 2);
+    } else if (direction === "top") {
+      ctx.moveTo(cx - size / 2, cy + size / 2);
+      ctx.lineTo(cx, cy - size / 2);
+      ctx.lineTo(cx + size / 2, cy + size / 2);
+    } else if (direction === "bottom") {
+      ctx.moveTo(cx - size / 2, cy - size / 2);
+      ctx.lineTo(cx, cy + size / 2);
+      ctx.lineTo(cx + size / 2, cy - size / 2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "#2563eb";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#1d4ed8";
+    ctx.stroke();
+    ctx.restore();
   }
 
   function wrapText(ctx, text, x, y, maxWidth, lineHeight, fontSize) {
@@ -408,6 +516,15 @@
     const y = clientY - rect.top;
     lastX = x;
     lastY = y;
+
+    const world = screenToWorld(x, y);
+    // Check if clicking on a Freeform-style handle first
+    const handle = findHandleAt(world.x, world.y);
+    if (handle && button === 0) {
+      addChildNode(handle.node, handle.direction);
+      return;
+    }
+
     const node = findNodeAt(x, y);
     if (node && button === 0) {
       pushHistory();
@@ -422,10 +539,31 @@
   }
 
   function handlePointerMove(clientX, clientY) {
-    if (!isPanning && !isDraggingNode) return;
     const rect = canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
+
+    // Update hover state for handles, keeping them visible when hovering node or handles
+    const world = screenToWorld(x, y);
+    let nodeForHover = findNodeAt(x, y);
+    if (!nodeForHover && hoverNodeId) {
+      const existing = getNodeById(hoverNodeId);
+      if (existing && getHandleDirectionAt(existing, world.x, world.y)) {
+        nodeForHover = existing;
+      }
+    }
+    const newHoverId = nodeForHover ? nodeForHover.id : null;
+    if (newHoverId !== hoverNodeId) {
+      hoverNodeId = newHoverId;
+      draw();
+    }
+
+    if (!isPanning && !isDraggingNode) {
+      lastX = x;
+      lastY = y;
+      return;
+    }
+
     const dx = x - lastX;
     const dy = y - lastY;
     lastX = x;
@@ -474,8 +612,9 @@
     const editor = document.createElement("textarea");
     editor.className = "inline-node-editor";
     editor.value = node.text || "";
-    editor.style.left = `${canvas.getBoundingClientRect().left + x - rectWidth / 2}px`;
-    editor.style.top = `${canvas.getBoundingClientRect().top + y - rectHeight / 2}px`;
+    const canvasRect = canvas.getBoundingClientRect();
+    editor.style.left = `${canvasRect.left + x - rectWidth / 2}px`;
+    editor.style.top = `${canvasRect.top + y - rectHeight / 2}px`;
     editor.style.width = `${rectWidth}px`;
     editor.style.height = `${rectHeight}px`;
 
