@@ -183,7 +183,9 @@
     nodeTextColorInput.value = state.nodeTextColor || "#111827";
     connectionColorInput.value = state.connectionColor || "#9ca3af";
     fontSizeInput.value = state.fontSize || 16;
+    connectorStyleSelect.value = state.connectorStyle || "solid";
     treeDirectionSelect.value = state.treeDirection || "top-down";
+    applyNodeStyleToAllBtn.style.display = "none";
   }
 
   function refreshTabBar() {
@@ -241,12 +243,17 @@
 
   function closeTab(index) {
     if (index < 0 || index >= tabs.length) return;
+    const closingActiveTab = index === activeTabIndex;
     tabs.splice(index, 1);
     if (!tabs.length) {
       createNewTab("Untitled 1", null);
       return;
     }
-    if (activeTabIndex >= tabs.length) {
+    if (index < activeTabIndex) {
+      activeTabIndex -= 1;
+    } else if (closingActiveTab) {
+      activeTabIndex = Math.min(index, tabs.length - 1);
+    } else if (activeTabIndex >= tabs.length) {
       activeTabIndex = tabs.length - 1;
     }
     const tab = tabs[activeTabIndex];
@@ -890,15 +897,16 @@
 
   function closeInlineEditor(applyChanges) {
     if (!inlineEditor) return;
+    const editor = inlineEditor;
     const node = getNodeById(editingNodeId);
-    if (applyChanges && node) {
-      pushHistory();
-      node.text = inlineEditor.value || "";
-      scheduleDraw();
-    }
-    inlineEditor.remove();
     inlineEditor = null;
     editingNodeId = null;
+    if (applyChanges && node) {
+      pushHistory();
+      node.text = editor.value || "";
+      scheduleDraw();
+    }
+    editor.remove();
   }
 
   // Zoom ------------------------------------------------------------------
@@ -1337,16 +1345,32 @@
       ext = "heif";
     }
 
+    function downloadJpegFallback() {
+      exportCanvas.toBlob(
+        (fallbackBlob) => {
+          if (!fallbackBlob) {
+            alert("The image could not be exported. Please try another format.");
+            return;
+          }
+          triggerDownloadFromBlob(fallbackBlob, filenameBase + ".jpg");
+          alert("HEIF export is not supported by this browser. The map was downloaded as JPEG instead.");
+        },
+        "image/jpeg",
+        qualityFactor
+      );
+    }
+
     exportCanvas.toBlob(
       (blob) => {
         if (!blob) {
           if (format === "heif") {
-            exportCanvas.toBlob((fallbackBlob) => {
-              if (!fallbackBlob) return;
-              triggerDownloadFromBlob(fallbackBlob, filenameBase + ".jpg");
-            }, "image/jpeg", qualityFactor);
+            downloadJpegFallback();
             return;
           }
+          return;
+        }
+        if (format === "heif" && !/^image\/hei[cf](?:-sequence)?$/i.test(blob.type)) {
+          downloadJpegFallback();
           return;
         }
         triggerDownloadFromBlob(blob, `${filenameBase}.${ext}`);
