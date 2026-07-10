@@ -77,7 +77,7 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
 
 - **index.html**
   - Defines the SPA chrome: toolbar, tab bar, left Settings panel, central canvas, and right Export panel.[cite:167]
-  - Loads `pdf-lib` from a CDN for client-side PDF generation and the app script (`app.js`).
+  - Loads the vendored `pdf-lib` browser bundle for offline PDF generation and the app script (`app.js`).
 
 - **app.js**
   - Implements the entire editor:
@@ -141,4 +141,4 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ## Third‑party libraries
 
-- [pdf-lib](https://github.com/Hopding/pdf-lib) — used for client-side PDF generation; it is licensed under the MIT licence, and its licence notice is preserved via this README and the linked upstream repository.
+- [pdf-lib](https://github.com/Hopding/pdf-lib) 1.17.1 — vendored for offline client-side PDF generation. Its MIT licence is preserved in [`vendor/pdf-lib.LICENSE.md`](vendor/pdf-lib.LICENSE.md).

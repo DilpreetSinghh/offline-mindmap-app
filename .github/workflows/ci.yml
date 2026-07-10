@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [public-beta]
+  pull_request:
+    branches: [public-beta]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Check offline runtime dependencies
+        run: node tests/static-checks.mjs
