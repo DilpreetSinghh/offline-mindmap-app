@@ -23,6 +23,13 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
     - **Open in new tab** – load a saved map from the dropdown into its own tab.
   - No map content is ever uploaded anywhere – everything stays in your browser.
 
+- **Autosave and recovery**
+  - Workspace changes are saved automatically after a short delay.
+  - Open tabs, the active tab, map content, camera position, styles, and layout settings return after a refresh or browser restart.
+  - The previous valid recovery snapshot is retained if the latest snapshot is corrupt or cannot be written.
+  - Versioned JSON backup and restore provides a portable offline copy of saved maps and the open workspace.
+  - Backup files are validated before any existing data is replaced.
+
 - **Canvas-based editor**
   - Nodes are drawn on an HTML `<canvas>` with rounded rectangles and soft drop shadows.[cite:168]
   - Connector lines are drawn between parent and child nodes, with support for solid or dashed styles.
@@ -88,6 +95,9 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
     - Local storage of maps and the toolbar flows for New / Save / Open.
     - Export engine using offscreen canvases plus `pdf-lib` for PDF and `canvas.toBlob` + `URL.createObjectURL` for image formats.[cite:168]
 
+- **storage.js**
+  - Defines the versioned backup schema, validation rules, and migrations used by autosave and JSON restore.
+
 - **styles.css**
   - Dark, glassy UI with soft gradients and rounded panels.
   - Responsive three-column layout on desktop (Settings → Canvas → Export), collapsing to stacked panels on smaller screens.
@@ -132,7 +142,6 @@ Some ideas that could be explored on top of the current foundation:
 
 - More advanced automatic layouts (force-directed, orthogonal tree, mind-map style left/right balancing).
 - Inline icons / emojis inside nodes.
-- Export/import of maps as JSON files.
 - Optional IndexedDB persistence for larger maps.
 
 ## License

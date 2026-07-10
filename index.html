@@ -16,8 +16,12 @@
         <select id="mapSelect"></select>
         <button id="openMapBtn">Open in new tab</button>
         <button id="saveMapBtn">Save</button>
+        <button id="backupJsonBtn">Backup JSON</button>
+        <button id="restoreJsonBtn">Restore JSON</button>
+        <input id="restoreJsonInput" type="file" accept="application/json,.json" hidden />
         <button id="undoBtn">Undo</button>
         <button id="redoBtn">Redo</button>
+        <span id="storageStatus" class="storage-status" role="status" aria-live="polite">Local recovery ready</span>
       </div>
       <div class="toolbar-right">
         <button id="addNodeBtn">Add node</button>
@@ -163,6 +167,7 @@
     </main>
   </div>
 
+  <script src="storage.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

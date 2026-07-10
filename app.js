@@ -8,6 +8,10 @@
   const newMapBtn = document.getElementById("newMapBtn");
   const openMapBtn = document.getElementById("openMapBtn");
   const saveMapBtn = document.getElementById("saveMapBtn");
+  const backupJsonBtn = document.getElementById("backupJsonBtn");
+  const restoreJsonBtn = document.getElementById("restoreJsonBtn");
+  const restoreJsonInput = document.getElementById("restoreJsonInput");
+  const storageStatus = document.getElementById("storageStatus");
   const undoBtn = document.getElementById("undoBtn");
   const redoBtn = document.getElementById("redoBtn");
   const addNodeBtn = document.getElementById("addNodeBtn");
@@ -39,6 +43,16 @@
   const tabBar = document.getElementById("tabBar");
 
   const STORAGE_KEY = "offline-mindmap-maps-v1";
+  const WORKSPACE_KEY = "offline-mindmap-workspace-v2";
+  const WORKSPACE_BACKUP_KEY = "offline-mindmap-workspace-v2-previous";
+  const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+  const {
+    SCHEMA_VERSION,
+    createBackup,
+    migrateBackup,
+    validateMaps,
+    validateWorkspace,
+  } = window.MindMapStorage;
 
   // Tabs: each tab keeps its own state object and optional storage id
   let tabs = [];
@@ -59,6 +73,9 @@
     connectionColor: "#9ca3af",
     fontSize: 16,
     treeDirection: "top-down",
+    layoutMode: "tree",
+    autoLayoutEnabled: false,
+    autoLayoutIntervalSec: 10,
   };
 
   // Undo history shared per tab (cleared when switching tabs)
@@ -80,12 +97,16 @@
 
   // Auto-layout
   let autoLayoutTimer = null;
-  let autoLayoutEnabled = false;
-  let autoLayoutIntervalSec = 10;
+
+  // Recovery autosave
+  let autosaveTimer = null;
+  let autosaveSuspended = true;
+  let lastWorkspaceContentSerialised = "";
 
   // Draw scheduling to avoid lag on hover
   let needsDraw = false;
   function scheduleDraw() {
+    scheduleAutosave();
     if (needsDraw) return;
     needsDraw = true;
     requestAnimationFrame(() => {
@@ -108,6 +129,134 @@
   function getActiveTab() {
     if (activeTabIndex < 0 || activeTabIndex >= tabs.length) return null;
     return tabs[activeTabIndex];
+  }
+
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / 1024 ** index;
+    return `${value.toFixed(index === 0 || value >= 10 ? 0 : 1)} ${units[index]}`;
+  }
+
+  function setStorageStatus(message, statusState) {
+    storageStatus.textContent = message;
+    storageStatus.dataset.state = statusState || "";
+  }
+
+  async function updateStorageEstimate(prefix) {
+    if (!navigator.storage || !navigator.storage.estimate) {
+      if (prefix) setStorageStatus(prefix, "saved");
+      return;
+    }
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usage = formatBytes(estimate.usage || 0);
+      const quota = formatBytes(estimate.quota || 0);
+      setStorageStatus(`${prefix || "Saved locally"} · ${usage} of ${quota}`, "saved");
+    } catch (_error) {
+      if (prefix) setStorageStatus(prefix, "saved");
+    }
+  }
+
+  function captureWorkspace() {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      savedAt: new Date().toISOString(),
+      activeTabIndex,
+      tabs,
+    };
+  }
+
+  function serialiseWorkspaceContent(workspace) {
+    return JSON.stringify({
+      schemaVersion: workspace.schemaVersion,
+      activeTabIndex: workspace.activeTabIndex,
+      tabs: workspace.tabs,
+    });
+  }
+
+  function writeWorkspaceSnapshot(workspace, options) {
+    const validation = validateWorkspace(workspace);
+    if (!validation.valid) {
+      setStorageStatus("Recovery save blocked: invalid workspace", "error");
+      console.warn("Workspace validation failed", validation.errors);
+      return false;
+    }
+    try {
+      const contentSerialised = serialiseWorkspaceContent(workspace);
+      if (!options?.force && contentSerialised === lastWorkspaceContentSerialised) return true;
+      const serialised = JSON.stringify(workspace);
+
+      const previous = localStorage.getItem(WORKSPACE_KEY);
+      if (previous) {
+        try {
+          const parsed = JSON.parse(previous);
+          if (validateWorkspace(parsed).valid) {
+            localStorage.setItem(WORKSPACE_BACKUP_KEY, previous);
+          }
+        } catch (_error) {
+          // Keep the last known valid backup when the current snapshot is corrupt.
+        }
+      }
+      localStorage.setItem(WORKSPACE_KEY, serialised);
+      lastWorkspaceContentSerialised = contentSerialised;
+      void updateStorageEstimate(`Saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      return true;
+    } catch (error) {
+      setStorageStatus("Local save failed — export a JSON backup", "error");
+      console.warn("Failed to save recovery workspace", error);
+      return false;
+    }
+  }
+
+  function flushAutosave() {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+    if (autosaveSuspended || !tabs.length || activeTabIndex < 0) return false;
+    return writeWorkspaceSnapshot(captureWorkspace());
+  }
+
+  function scheduleAutosave() {
+    if (autosaveSuspended || !tabs.length || activeTabIndex < 0) return;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(flushAutosave, 450);
+  }
+
+  function readRecoveryWorkspace() {
+    for (const key of [WORKSPACE_KEY, WORKSPACE_BACKUP_KEY]) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const workspace = JSON.parse(raw);
+        if (validateWorkspace(workspace).valid) {
+          if (key === WORKSPACE_BACKUP_KEY) {
+            setStorageStatus("Recovered previous valid workspace", "saved");
+          }
+          return workspace;
+        }
+      } catch (error) {
+        console.warn(`Failed to read recovery snapshot ${key}`, error);
+      }
+    }
+    return null;
+  }
+
+  function applyWorkspace(workspace) {
+    const validation = validateWorkspace(workspace);
+    if (!validation.valid) throw new Error(validation.errors.join("\n"));
+    closeInlineEditor(false);
+    tabs = JSON.parse(JSON.stringify(workspace.tabs));
+    activeTabIndex = workspace.activeTabIndex;
+    state = tabs[activeTabIndex].state;
+    history = [];
+    future = [];
+    syncInputsFromState();
+    refreshTabBar();
+    resetAutoLayoutTimer();
+    scheduleDraw();
   }
 
   function pushHistory() {
@@ -185,6 +334,9 @@
     fontSizeInput.value = state.fontSize || 16;
     connectorStyleSelect.value = state.connectorStyle || "solid";
     treeDirectionSelect.value = state.treeDirection || "top-down";
+    layoutModeSelect.value = state.layoutMode || "tree";
+    autoLayoutToggle.checked = Boolean(state.autoLayoutEnabled);
+    autoLayoutIntervalInput.value = state.autoLayoutIntervalSec || 10;
     applyNodeStyleToAllBtn.style.display = "none";
   }
 
@@ -220,11 +372,11 @@
       clearInterval(autoLayoutTimer);
       autoLayoutTimer = null;
     }
-    if (!autoLayoutEnabled || !state.nodes.length) return;
-    const ms = Math.max(1, autoLayoutIntervalSec) * 1000;
+    if (!state.autoLayoutEnabled || !state.nodes.length) return;
+    const ms = Math.max(1, state.autoLayoutIntervalSec || 10) * 1000;
     autoLayoutTimer = setInterval(() => {
       if (!state.nodes.length) return;
-      applyLayout(layoutModeSelect.value);
+      applyLayout(state.layoutMode || "tree");
     }, ms);
   }
 
@@ -281,6 +433,9 @@
       connectionColor: connectionColorInput.value,
       fontSize: parseInt(fontSizeInput.value, 10) || 16,
       treeDirection: treeDirectionSelect.value,
+      layoutMode: layoutModeSelect.value,
+      autoLayoutEnabled: autoLayoutToggle.checked,
+      autoLayoutIntervalSec: parseInt(autoLayoutIntervalInput.value, 10) || 10,
     };
     createInitialMap();
     const tab = { id: id || null, name: name || "Untitled", state };
@@ -881,9 +1036,11 @@
     editor.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
+        e.stopPropagation();
         closeInlineEditor(true);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         closeInlineEditor(false);
       }
     });
@@ -1387,7 +1544,12 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const list = JSON.parse(raw);
-      if (!Array.isArray(list)) return [];
+      const validation = validateMaps(list);
+      if (!validation.valid) {
+        console.warn("Saved maps failed validation", validation.errors);
+        setStorageStatus("Saved-map data is invalid — recovery copy preserved", "error");
+        return [];
+      }
       return list;
     } catch (e) {
       console.warn("Failed to read stored maps", e);
@@ -1396,10 +1558,20 @@
   }
 
   function saveMapsToStorage(maps) {
+    const validation = validateMaps(maps);
+    if (!validation.valid) {
+      console.warn("Refused to save invalid maps", validation.errors);
+      setStorageStatus("Map save blocked: invalid data", "error");
+      return false;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(maps));
+      scheduleAutosave();
+      return true;
     } catch (e) {
       console.warn("Failed to save maps", e);
+      setStorageStatus("Map save failed — export a JSON backup", "error");
+      return false;
     }
   }
 
@@ -1441,12 +1613,13 @@
       tab.id = id;
       maps.push({ id, name, data: state });
     }
-    saveMapsToStorage(maps);
+    if (!saveMapsToStorage(maps)) return;
     refreshMapSelect();
     refreshTabBar();
     if (tab.id) {
       mapSelect.value = tab.id;
     }
+    flushAutosave();
   }
 
   function openSelectedMap() {
@@ -1478,6 +1651,79 @@
   function newMap() {
     const label = `Untitled ${tabs.length + 1}`;
     createNewTab(label, null);
+  }
+
+  function exportJsonBackup() {
+    closeInlineEditor(true);
+    flushAutosave();
+    try {
+      const backup = createBackup(loadMapsFromStorage(), captureWorkspace());
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      triggerDownloadFromBlob(blob, `offline-mindmap-backup-${stamp}.json`);
+      setStorageStatus("JSON backup downloaded", "saved");
+    } catch (error) {
+      console.warn("Failed to create JSON backup", error);
+      setStorageStatus("Backup failed: workspace data is invalid", "error");
+    }
+  }
+
+  async function importJsonBackup(file) {
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      setStorageStatus("Backup rejected: file is larger than 10 MB", "error");
+      return;
+    }
+
+    let previousMaps = null;
+    let previousWorkspace = null;
+    let restoreStarted = false;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const backup = migrateBackup(parsed);
+      const shouldRestore = confirm(
+        `Restore ${backup.workspace.tabs.length} tab(s) and ${backup.maps.length} saved map(s)? ` +
+          "The current workspace will remain available as the previous recovery snapshot."
+      );
+      if (!shouldRestore) {
+        setStorageStatus("Restore cancelled", "");
+        return;
+      }
+
+      autosaveSuspended = true;
+      previousMaps = localStorage.getItem(STORAGE_KEY);
+      previousWorkspace = localStorage.getItem(WORKSPACE_KEY);
+      restoreStarted = true;
+      if (previousWorkspace) localStorage.setItem(WORKSPACE_BACKUP_KEY, previousWorkspace);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(backup.maps));
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify(backup.workspace));
+      applyWorkspace(backup.workspace);
+      lastWorkspaceContentSerialised = serialiseWorkspaceContent(backup.workspace);
+      refreshMapSelect();
+      autosaveSuspended = false;
+      flushAutosave();
+      setStorageStatus("JSON backup restored", "saved");
+    } catch (error) {
+      autosaveSuspended = false;
+      if (restoreStarted) {
+        if (previousMaps === null) localStorage.removeItem(STORAGE_KEY);
+        else localStorage.setItem(STORAGE_KEY, previousMaps);
+        if (previousWorkspace === null) localStorage.removeItem(WORKSPACE_KEY);
+        else {
+          localStorage.setItem(WORKSPACE_KEY, previousWorkspace);
+          try {
+            const parsedPreviousWorkspace = JSON.parse(previousWorkspace);
+            if (validateWorkspace(parsedPreviousWorkspace).valid) applyWorkspace(parsedPreviousWorkspace);
+          } catch (_rollbackError) {
+            // Preserve the recovery backup even if the previous snapshot cannot be reopened.
+          }
+        }
+      }
+      console.warn("Backup restore rejected", error);
+      setStorageStatus(`Restore failed: ${error.message}`, "error");
+    } finally {
+      restoreJsonInput.value = "";
+    }
   }
 
   // Node style & layout events -------------------------------------------
@@ -1531,6 +1777,13 @@
 
   treeDirectionSelect.addEventListener("change", () => {
     state.treeDirection = treeDirectionSelect.value;
+    scheduleDraw();
+  });
+
+  layoutModeSelect.addEventListener("change", () => {
+    state.layoutMode = layoutModeSelect.value;
+    resetAutoLayoutTimer();
+    scheduleDraw();
   });
 
   applyLayoutBtn.addEventListener("click", () => {
@@ -1550,16 +1803,18 @@
   });
 
   autoLayoutToggle.addEventListener("change", () => {
-    autoLayoutEnabled = autoLayoutToggle.checked;
+    state.autoLayoutEnabled = autoLayoutToggle.checked;
     resetAutoLayoutTimer();
+    scheduleDraw();
   });
 
   autoLayoutIntervalInput.addEventListener("change", () => {
     let v = parseInt(autoLayoutIntervalInput.value, 10);
     if (!v || v < 1) v = 5;
-    autoLayoutIntervalSec = v;
+    state.autoLayoutIntervalSec = v;
     autoLayoutIntervalInput.value = v;
     resetAutoLayoutTimer();
+    scheduleDraw();
   });
 
   sizePresetSelect.addEventListener("change", () => {
@@ -1602,6 +1857,11 @@
 
   newMapBtn.addEventListener("click", newMap);
   saveMapBtn.addEventListener("click", saveCurrentMap);
+  backupJsonBtn.addEventListener("click", exportJsonBackup);
+  restoreJsonBtn.addEventListener("click", () => restoreJsonInput.click());
+  restoreJsonInput.addEventListener("change", () => {
+    void importJsonBackup(restoreJsonInput.files?.[0]);
+  });
   openMapBtn.addEventListener("click", openSelectedMap);
   undoBtn.addEventListener("click", undo);
   redoBtn.addEventListener("click", redo);
@@ -1609,6 +1869,16 @@
   deleteNodeBtn.addEventListener("click", deleteSelectedNode);
   autoFitBtn.addEventListener("click", autoFit);
 
+  window.addEventListener("beforeunload", flushAutosave);
+
   refreshMapSelect();
-  createNewTab("Untitled 1", null);
+  const recoveryWorkspace = readRecoveryWorkspace();
+  if (recoveryWorkspace) {
+    applyWorkspace(recoveryWorkspace);
+    lastWorkspaceContentSerialised = serialiseWorkspaceContent(recoveryWorkspace);
+  } else {
+    createNewTab("Untitled 1", null);
+  }
+  autosaveSuspended = false;
+  flushAutosave();
 })();

@@ -18,6 +18,8 @@ jobs:
         with:
           node-version: 22
       - name: Check JavaScript syntax
-        run: node --check app.js
+        run: node --check app.js && node --check storage.js
+      - name: Test storage validation and migrations
+        run: node --test tests/*.test.cjs
       - name: Check offline runtime dependencies
         run: node tests/static-checks.mjs
