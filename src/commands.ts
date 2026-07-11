@@ -28,6 +28,7 @@ export type CommandId =
   | "paste-subtree"
   | "duplicate-subtree"
   | "delete-subtree"
+  | "reflow-map"
   | "add-relationship"
   | "command-palette"
   | "shortcut-help";
@@ -241,6 +242,21 @@ function addRelationship(context: CommandContext): void {
   transact(context.api, next, arrow ? [arrow.id] : []);
 }
 
+function reflowMap(context: CommandContext): void {
+  const elements = context.api.getSceneElements();
+  const nodes = elements.filter((element) => getMindmapNode(element));
+  if (nodes.length < 2) {
+    context.announce("Add at least one child before rearranging the map.", "error");
+    return;
+  }
+  const selectedIds = Object.keys(context.api.getAppState().selectedElementIds);
+  const next = reflowMindmapElements(elements);
+  transact(context.api, next, selectedIds);
+  const arrangedNodes = next.filter((element) => getMindmapNode(element));
+  context.api.scrollToContent(arrangedNodes, { animate: true, fitToContent: true, maxZoom: 1 });
+  context.announce("Mind map rearranged with space for every subtree.");
+}
+
 export const commandRegistry: readonly Command[] = [
   { id: "new-child", label: "Create child node", shortcut: "Tab", keywords: "child branch", execute: (c) => addConnectedNode(c, "child") },
   { id: "new-sibling", label: "Create sibling node", shortcut: "Cmd/Ctrl+Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
@@ -257,6 +273,7 @@ export const commandRegistry: readonly Command[] = [
   { id: "paste-subtree", label: "Paste subtree", shortcut: "Cmd/Ctrl+V", keywords: "clipboard paste branch", execute: pasteSubtree },
   { id: "duplicate-subtree", label: "Duplicate subtree", shortcut: "Cmd/Ctrl+D", keywords: "copy duplicate branch", execute: async (c) => { await copySubtree(c); pasteSubtree(c); } },
   { id: "delete-subtree", label: "Delete subtree", shortcut: "Delete", keywords: "remove branch", execute: removeSubtree },
+  { id: "reflow-map", label: "Rearrange mind map", shortcut: "", keywords: "layout reflow space overlap branches", execute: reflowMap },
   { id: "add-relationship", label: "Connect selected nodes as a relationship", shortcut: "", keywords: "arrow cross connection", execute: addRelationship },
   { id: "command-palette", label: "Open command palette", shortcut: "Cmd/Ctrl+K", keywords: "search commands", execute: (c) => c.openPalette() },
   { id: "shortcut-help", label: "Open shortcut reference", shortcut: "?", keywords: "help keyboard", execute: (c) => c.openHelp() },

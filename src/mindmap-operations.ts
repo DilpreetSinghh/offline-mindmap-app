@@ -8,7 +8,7 @@ import {
   getMindmapNode,
   refreshMindmapConnectionGeometry,
 } from "./document";
-import { calculateTreeLayout } from "./tree-layout.mjs";
+import { calculateTreeLayout, shouldReflowAfterInsertion } from "./tree-layout.mjs";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
 
@@ -191,7 +191,7 @@ export function addConnectedMindmapNode(
     nodeId,
     "hierarchy",
   );
-  if (direction === "child" || direction === "sibling") next = reflowMindmapElements(next);
+  if (shouldReflowAfterInsertion(direction)) next = reflowMindmapElements(next);
   return { elements: next, nodeElementId: shape.id, nodeId };
 }
 

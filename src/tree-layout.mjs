@@ -1,6 +1,10 @@
 export const TREE_HORIZONTAL_GAP = 110;
 export const TREE_VERTICAL_GAP = 48;
 
+export function shouldReflowAfterInsertion(direction) {
+  return direction === "child" || direction === "sibling" || direction === "right";
+}
+
 /**
  * Produces a stable left-to-right tree layout while keeping the root centred.
  * Every sibling receives enough vertical space for its complete subtree, so

@@ -622,6 +622,7 @@ export default function App() {
             <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
             <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>⌘↵</kbd></button>
             <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
+            <button type="button" onClick={() => executeCommand("reflow-map")}><strong>Rearrange map</strong><span>Fix spacing</span></button>
             <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>⌘D</kbd></button>
             <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
             <div className="rail-note"><b>Fast mapping</b><p>Double-click to edit text. Cmd/Ctrl + arrow grows a branch; plain arrows move selection.</p></div>

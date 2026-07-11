@@ -21,7 +21,8 @@ The editor combines a keyboard-fast semantic mind-map layer with Excalidraw's ge
   - Tab creates a child; Cmd/Ctrl+Enter creates a sibling without overriding Excalidraw's native Enter text action; Cmd/Ctrl+Arrow creates a bound node in a direction.
   - Plain arrows navigate to the nearest visible mind-map node.
   - Subtree copy, cut, paste, duplication and deletion share one command registry with the toolbar and searchable command palette.
-  - Child and sibling insertion runs a recursive subtree layout. Expanded third-level branches reserve their full height and move neighbouring branches while preserving bound arrows.
+  - Child, sibling, and right-arrow insertion runs a recursive full-tree layout. Expanded third-level branches reserve their full height and move neighbouring branches while preserving bound arrows.
+  - **Rearrange map** repairs spacing in an existing map and fits the complete hierarchy into view.
   - Hierarchy arrows reject cycles; relationship arrows allow cycles and never change hierarchy.
 - **Local persistence**
   - Named schema-3 documents and binary assets are stored in IndexedDB.

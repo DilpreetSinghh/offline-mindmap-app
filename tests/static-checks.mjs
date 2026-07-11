@@ -8,6 +8,7 @@ const betaApp = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8
 const betaDocument = await readFile(new URL("../src/document.ts", import.meta.url), "utf8");
 const betaDatabase = await readFile(new URL("../src/db.ts", import.meta.url), "utf8");
 const betaCommands = await readFile(new URL("../src/commands.ts", import.meta.url), "utf8");
+const betaOperations = await readFile(new URL("../src/mindmap-operations.ts", import.meta.url), "utf8");
 const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
@@ -42,6 +43,8 @@ assert.match(betaApp, /editingTextElement:\s*null/, "Transient text-editing stat
 assert.doesNotMatch(betaApp, /context-menu/, "The app must not layer a custom context menu over Excalidraw");
 assert.doesNotMatch(betaCommands, /!modifier && key === "Enter"/, "Plain Enter must remain available to Excalidraw text editing");
 assert.match(betaCommands, /modifier && key === "Enter"/, "The sibling shortcut must avoid Excalidraw's native Enter action");
+assert.match(betaCommands, /Rearrange mind map/, "Existing maps must expose an explicit spacing repair command");
+assert.match(betaOperations, /shouldReflowAfterInsertion\(direction\)/, "All supported insertion paths must share the reflow policy");
 assert.match(simpleMindmap, /Simple mind map/, "A non-Excalidraw simple mobile surface must be available");
 assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hierarchy arrows");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
