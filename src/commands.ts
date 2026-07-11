@@ -12,6 +12,9 @@ import {
   removeMindmapSubtree,
 } from "./mindmap-operations";
 import type { MindmapNodeData } from "./types";
+import { routeMindmapShortcut } from "./shortcut-routing.mjs";
+
+export { formatShortcutLabel } from "./shortcut-routing.mjs";
 
 export type CommandId =
   | "new-child"
@@ -294,7 +297,7 @@ function reflowMap(context: CommandContext): void {
 
 export const commandRegistry: readonly Command[] = [
   { id: "new-child", label: "Create child node", shortcut: "Tab", keywords: "child branch", execute: (c) => addConnectedNode(c, "child") },
-  { id: "new-sibling", label: "Create sibling node", shortcut: "Cmd/Ctrl+Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
+  { id: "new-sibling", label: "Create sibling node", shortcut: "Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
   { id: "new-left", label: "Create node to the left", shortcut: "Cmd/Ctrl+←", keywords: "left node", execute: (c) => addConnectedNode(c, "left") },
   { id: "new-right", label: "Create node to the right", shortcut: "Cmd/Ctrl+→", keywords: "right node", execute: (c) => addConnectedNode(c, "right") },
   { id: "new-up", label: "Create node above", shortcut: "Cmd/Ctrl+↑", keywords: "up node", execute: (c) => addConnectedNode(c, "up") },
@@ -325,19 +328,10 @@ export function isTextEditing(appState: AppState): boolean {
 }
 
 export function commandForKeyboardEvent(event: KeyboardEvent, appState: AppState): CommandId | null {
-  const modifier = event.metaKey || event.ctrlKey;
-  const key = event.key;
-  if (modifier && key.toLowerCase() === "k") return "command-palette";
-  if (!modifier && key === "?" && !isTextEditing(appState)) return "shortcut-help";
-  if (isTextEditing(appState)) return null;
-  if (modifier && key.startsWith("Arrow")) return `new-${key.slice(5).toLowerCase()}` as CommandId;
-  if (!modifier && key.startsWith("Arrow")) return `select-${key.slice(5).toLowerCase()}` as CommandId;
-  if (!modifier && key === "Tab") return "new-child";
-  if (modifier && key === "Enter") return "new-sibling";
-  if (modifier && key.toLowerCase() === "c") return "copy-subtree";
-  if (modifier && key.toLowerCase() === "x") return "cut-subtree";
-  if (modifier && key.toLowerCase() === "v") return "paste-subtree";
-  if (modifier && key.toLowerCase() === "d") return "duplicate-subtree";
-  if (!modifier && (key === "Delete" || key === "Backspace")) return "delete-subtree";
-  return null;
+  const target = event.target;
+  const formControl = target instanceof HTMLElement && Boolean(
+    target.isContentEditable
+    || target.closest("input, textarea, select, button, [role='textbox'], [contenteditable='true']"),
+  );
+  return routeMindmapShortcut(event, { editing: isTextEditing(appState), formControl }) as CommandId | null;
 }

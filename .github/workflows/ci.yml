@@ -17,9 +17,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check JavaScript syntax
-        run: node --check app.js && node --check storage.js && node --check hierarchy.js
-      - name: Test storage validation and migrations
-        run: node --test tests/*.test.cjs
-      - name: Check offline runtime dependencies
-        run: node tests/static-checks.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Run complete test suite
+        run: npm test
+      - name: Build production bundle
+        run: npm run build

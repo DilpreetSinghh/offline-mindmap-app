@@ -8,7 +8,7 @@ import {
 import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import { commandForKeyboardEvent, commandRegistry, findCommand, type CommandContext, type CommandId } from "./commands";
+import { commandForKeyboardEvent, commandRegistry, findCommand, formatShortcutLabel, type CommandContext, type CommandId } from "./commands";
 import {
   assertValidDocument,
   createBlankDocument,
@@ -98,6 +98,10 @@ function formatTime(date = new Date()): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function displayShortcut(shortcut: string): string {
+  return formatShortcutLabel(shortcut, navigator.platform || navigator.userAgent);
+}
+
 function isMindmapSelection(api: ExcalidrawImperativeAPI): boolean {
   const selected = api.getAppState().selectedElementIds;
   const elements = api.getSceneElements();
@@ -143,6 +147,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [helpQuery, setHelpQuery] = useState("");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
   const [nameRequest, setNameRequest] = useState<{ copy: boolean; value: string } | null>(null);
   const [mobileUse, setMobileUse] = useState(detectsMobileUse);
@@ -565,6 +570,14 @@ export default function App() {
     return commandRegistry.filter((command) => !query || `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query));
   }, [paletteQuery]);
 
+  const filteredShortcuts = useMemo(() => {
+    const query = helpQuery.trim().toLowerCase();
+    return commandRegistry.filter((command) => (
+      command.shortcut
+      && (!query || `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query))
+    ));
+  }, [helpQuery]);
+
   if (!ready || !activeTab) {
     return (
       <main className="loading-screen">
@@ -609,7 +622,7 @@ export default function App() {
           <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
         </div>
         <div className="mode-actions">
-          <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>⌘K</kbd></button>
+          <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>{displayShortcut("Cmd/Ctrl+K")}</kbd></button>
           <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
         </div>
       </header>
@@ -634,10 +647,10 @@ export default function App() {
           <aside className="mindmap-rail" aria-label="Mind-map tools">
             <div className="rail-heading"><span>Mind-map mode</span><button type="button" onClick={() => setHelpOpen(true)} aria-label="Shortcut help">?</button></div>
             <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
-            <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>⌘↵</kbd></button>
+            <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>Enter</kbd></button>
             <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
             <button type="button" onClick={() => executeCommand("reflow-map")}><strong>Rearrange map</strong><span>Fix spacing</span></button>
-            <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>⌘D</kbd></button>
+            <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>{displayShortcut("Cmd/Ctrl+D")}</kbd></button>
             <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
             <div className="rail-note"><b>Fast mapping</b><p>Double-click to edit text. Cmd/Ctrl + arrow grows a branch; plain arrows move selection.</p></div>
           </aside>
@@ -721,14 +734,15 @@ export default function App() {
       {paletteOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setPaletteOpen(false)}>
         <section className="command-dialog" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
           <input autoFocus placeholder="Search commands…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
-          <div className="command-list">{filteredCommands.map((command) => <button type="button" key={command.id} onClick={() => { executeCommand(command.id); setPaletteOpen(false); }}><span>{command.label}<small>{command.keywords}</small></span><kbd>{command.shortcut}</kbd></button>)}</div>
+          <div className="command-list">{filteredCommands.map((command) => <button type="button" key={command.id} onClick={() => { executeCommand(command.id); setPaletteOpen(false); }}><span>{command.label}<small>{command.keywords}</small></span><kbd>{displayShortcut(command.shortcut)}</kbd></button>)}</div>
         </section>
       </div> : null}
 
       {helpOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setHelpOpen(false)}>
         <section className="shortcut-dialog" role="dialog" aria-modal="true" aria-label="Shortcut reference" onMouseDown={(event) => event.stopPropagation()}>
           <header><div><span className="eyebrow">KEYBOARD-FIRST</span><h2>Shortcut reference</h2></div><button type="button" onClick={() => setHelpOpen(false)}>Close</button></header>
-          <div>{commandRegistry.filter((command) => command.shortcut).map((command) => <p key={command.id}><span>{command.label}</span><kbd>{command.shortcut}</kbd></p>)}</div>
+          <input autoFocus aria-label="Search shortcuts" placeholder="Search shortcuts…" value={helpQuery} onChange={(event) => setHelpQuery(event.target.value)} />
+          <div>{filteredShortcuts.map((command) => <p key={command.id}><span>{command.label}</span><kbd>{displayShortcut(command.shortcut)}</kbd></p>)}</div>
           <footer>Excalidraw tools: V select · R rectangle · D diamond · O ellipse · A arrow · L line · P freehand · T text · E eraser</footer>
         </section>
       </div> : null}

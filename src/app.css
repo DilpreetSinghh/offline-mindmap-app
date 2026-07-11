@@ -76,6 +76,8 @@ kbd { border: 1px solid #d8d1c6; border-bottom-width: 2px; border-radius: 5px; p
 .shortcut-dialog { padding: 20px; }
 .shortcut-dialog header { display: flex; justify-content: space-between; align-items: start; }
 .shortcut-dialog header button { padding: 7px 10px; }
+.shortcut-dialog > input { width: 100%; height: 42px; margin: 12px 0; padding: 0 12px; border: 1px solid #cfc7bb; border-radius: 10px; outline: none; background: #fff; }
+.shortcut-dialog > input:focus { border-color: #9c6a2e; box-shadow: 0 0 0 3px rgba(156,106,46,.12); }
 .shortcut-dialog > div { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; max-height: 45vh; overflow: auto; }
 .shortcut-dialog p { display: flex; justify-content: space-between; align-items: center; margin: 0; padding: 9px 2px; border-bottom: 1px solid #e4ded5; font-size: 11px; }
 .shortcut-dialog footer { margin-top: 16px; padding: 10px; border-radius: 10px; background: #ede8de; color: #756c61; font-size: 10px; }

@@ -42,8 +42,8 @@ assert.match(betaApp, /surfaceMode === "whiteboard"/, "The default app must supp
 assert.match(betaApp, /detectsMobileUse/, "The app must automatically detect mobile use");
 assert.match(betaApp, /editingTextElement:\s*null/, "Transient text-editing state must not survive recovery or reload");
 assert.doesNotMatch(betaApp, /context-menu/, "The app must not layer a custom context menu over Excalidraw");
-assert.doesNotMatch(betaCommands, /!modifier && key === "Enter"/, "Plain Enter must remain available to Excalidraw text editing");
-assert.match(betaCommands, /modifier && key === "Enter"/, "The sibling shortcut must avoid Excalidraw's native Enter action");
+assert.match(betaCommands, /routeMindmapShortcut/, "Keyboard commands must use the platform-neutral tested shortcut router");
+assert.match(betaApp, /aria-label="Search shortcuts"/, "The shortcut reference opened by ? must be searchable");
 assert.match(betaCommands, /Rearrange mind map/, "Existing maps must expose an explicit spacing repair command");
 assert.match(betaOperations, /shouldReflowAfterInsertion\(direction\)/, "All supported insertion paths must share the reflow policy");
 assert.match(betaOperations, /inferBoundTree/, "Rearrange must include ordinary shapes connected with arrows");
