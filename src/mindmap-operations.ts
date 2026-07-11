@@ -11,6 +11,8 @@ import {
 import { calculateTreeLayout, shouldReflowAfterInsertion } from "./tree-layout.mjs";
 import { inferBoundTree } from "./bound-tree.mjs";
 import { expandSelectedBranches } from "./subtree-selection.mjs";
+import { moveOutlineRecords } from "./outline-hierarchy.mjs";
+import type { MindmapNodeData } from "./types";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
 
@@ -294,4 +296,43 @@ export function removeMindmapSubtrees(
     return !connection || (!wanted.has(connection.fromNodeId) && !wanted.has(connection.toNodeId));
   });
   return reflowMindmapElements(remaining, rootNodeId);
+}
+
+export type OutlineMove = "up" | "down" | "indent" | "outdent";
+
+export function moveMindmapNodeInOutline(
+  elements: readonly OrderedExcalidrawElement[],
+  nodeId: string,
+  move: OutlineMove,
+): OrderedExcalidrawElement[] | null {
+  const records = elements.flatMap((element) => {
+    const data = getMindmapNode(element);
+    return data ? [{ element, data: { ...data } }] : [];
+  });
+  const moved = moveOutlineRecords(records.map((record) => record.data), nodeId, move) as MindmapNodeData[] | null;
+  if (!moved) return null;
+  const movedById = new Map(moved.map((record) => [record.nodeId, record]));
+  records.forEach((record) => { record.data = movedById.get(record.data.nodeId)!; });
+  const nextParentId = movedById.get(nodeId)!.parentNodeId!;
+  const nodeByElementId = new Map(records.map((record) => [record.element.id, record.data]));
+  let next = elements.map((element) => {
+    const data = nodeByElementId.get(element.id);
+    return data ? newElementWith(element, { customData: { ...element.customData, mindmapNode: data } }) as OrderedExcalidrawElement : element;
+  });
+  if (move === "indent" || move === "outdent") {
+    const oldArrowIds = new Set(next.flatMap((element) => {
+      const connection = getMindmapConnection(element);
+      return connection?.role === "hierarchy" && connection.toNodeId === nodeId ? [element.id] : [];
+    }));
+    next = next
+      .filter((element) => !oldArrowIds.has(element.id))
+      .map((element) => oldArrowIds.size && element.boundElements?.some((binding) => oldArrowIds.has(binding.id))
+        ? newElementWith(element, { boundElements: element.boundElements.filter((binding) => !oldArrowIds.has(binding.id)) }) as OrderedExcalidrawElement
+        : element);
+    const parentShape = next.find((element) => getMindmapNode(element)?.nodeId === nextParentId);
+    const childShape = next.find((element) => getMindmapNode(element)?.nodeId === nodeId);
+    if (!parentShape || !childShape) return null;
+    next = appendBoundConnection(next, parentShape.id, childShape.id, nextParentId, nodeId, "hierarchy");
+  }
+  return reflowMindmapElements(next);
 }

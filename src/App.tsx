@@ -43,9 +43,11 @@ import {
 import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
 import type { DocumentV3, EditorTab } from "./types";
 import SimpleMindmap from "./SimpleMindmap";
+import OutlineView, { outlineMarkdown } from "./OutlineView";
 import {
   addConnectedMindmapNode,
   ensureEditableMindmapElements,
+  moveMindmapNodeInOutline,
   replaceMindmapNodeTexts,
   removeMindmapSubtree,
   renameMindmapNode,
@@ -59,7 +61,7 @@ const SURFACE_MODE_KEY = "offline-mindmap-surface-mode-v1";
 const AUTOSAVE_DELAY = 600;
 
 type Status = { message: string; state: "" | "saved" | "error" };
-type SurfaceMode = "simple" | "whiteboard";
+type SurfaceMode = "simple" | "outline" | "whiteboard";
 
 function detectsMobileUse(): boolean {
   return window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
@@ -67,7 +69,7 @@ function detectsMobileUse(): boolean {
 
 function readSurfaceOverride(): SurfaceMode | null {
   const stored = localStorage.getItem(SURFACE_MODE_KEY);
-  return stored === "simple" || stored === "whiteboard" ? stored : null;
+  return stored === "simple" || stored === "outline" || stored === "whiteboard" ? stored : null;
 }
 
 function cleanPersistedAppState(appState: Partial<AppState>): Partial<AppState> {
@@ -436,12 +438,22 @@ export default function App() {
         activeTabRef.current = captured;
         updateCapturedTab(captured);
       }
+      if (resolved === "outline" && apiRef.current) {
+        const selected = apiRef.current.getAppState().selectedElementIds;
+        const node = apiRef.current.getSceneElements().find((element) => selected[element.id] && getMindmapNode(element));
+        const nodeId = node && getMindmapNode(node)?.nodeId;
+        if (nodeId) setSimpleSelectedNodeId(nodeId);
+      }
+    }
+    if (surfaceModeRef.current === "outline" && resolved === "whiteboard" && apiRef.current) {
+      const shape = activeTabRef.current?.document.scene.elements.find((element) => getMindmapNode(element)?.nodeId === simpleSelectedNodeId);
+      if (shape) apiRef.current.updateScene({ appState: { selectedElementIds: { [shape.id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
     }
     if (mode) localStorage.setItem(SURFACE_MODE_KEY, mode);
     else localStorage.removeItem(SURFACE_MODE_KEY);
     setSurfaceOverride(mode);
-    announce(`${mode ? "Switched" : "Automatic view switched"} to ${resolved === "simple" ? "Simple map" : "Whiteboard"}.`);
-  }, [announce, captureActiveTab, updateCapturedTab]);
+    announce(`${mode ? "Switched" : "Automatic view switched"} to ${resolved === "simple" ? "Simple map" : resolved === "outline" ? "Outline" : "Whiteboard"}.`);
+  }, [announce, captureActiveTab, simpleSelectedNodeId, updateCapturedTab]);
 
   const applySimpleElements = useCallback((
     elements: readonly OrderedExcalidrawElement[],
@@ -510,6 +522,57 @@ export default function App() {
       node.collapsed ? "Branch expanded." : "Branch collapsed.",
     );
   }, [applySimpleElements]);
+
+  const applyOutlineElements = useCallback((elements: readonly OrderedExcalidrawElement[], selectedNodeId: string, message: string) => {
+    applySimpleElements(elements, selectedNodeId, message);
+    const api = apiRef.current;
+    if (!api) return;
+    const shape = elements.find((element) => getMindmapNode(element)?.nodeId === selectedNodeId);
+    semanticUpdateRef.current = true;
+    api.updateScene({ elements: projectFoldedElements(elements), appState: shape ? { selectedElementIds: { [shape.id]: true } } : undefined, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    semanticUpdateRef.current = false;
+  }, [applySimpleElements]);
+
+  const moveOutlineNode = useCallback((nodeId: string, move: "up" | "down" | "indent" | "outdent") => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const elements = moveMindmapNodeInOutline(tab.document.scene.elements, nodeId, move);
+    if (!elements) { announce(`Cannot ${move} this node.`, "error"); return; }
+    applyOutlineElements(elements, nodeId, `Node ${move === "up" || move === "down" ? `moved ${move}` : move === "indent" ? "indented" : "outdented"}.`);
+  }, [announce, applyOutlineElements]);
+
+  const renameOutlineNode = useCallback((nodeId: string, value: string) => {
+    const tab = activeTabRef.current;
+    if (tab) applyOutlineElements(renameMindmapNode(tab.document.scene.elements, nodeId, value), nodeId, "Node text updated.");
+  }, [applyOutlineElements]);
+
+  const deleteOutlineNode = useCallback((nodeId: string) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const elements = removeMindmapSubtree(tab.document.scene.elements, nodeId, tab.document.rootNodeId);
+    if (!elements) { announce("The central node cannot be deleted.", "error"); return; }
+    applyOutlineElements(elements, tab.document.rootNodeId, "Branch deleted and remaining nodes rearranged.");
+  }, [announce, applyOutlineElements]);
+
+  const toggleOutlineFold = useCallback((nodeId: string) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const node = tab.document.scene.elements.map(getMindmapNode).find((item) => item?.nodeId === nodeId);
+    if (node) applyOutlineElements(setNodesCollapsed(tab.document.scene.elements, [nodeId], !node.collapsed), nodeId, node.collapsed ? "Branch expanded." : "Branch collapsed.");
+  }, [applyOutlineElements]);
+
+  const exportOutline = useCallback(() => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const blob = new Blob([outlineMarkdown(tab.document.scene.elements, tab.document.rootNodeId)], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${tab.document.name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "outline"}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    announce("Outline exported as Markdown.");
+  }, [announce]);
 
   const onSceneChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
@@ -788,6 +851,7 @@ export default function App() {
         <div className="surface-switch" role="group" aria-label="Editor view">
           <button type="button" aria-pressed={surfaceOverride === null} onClick={() => chooseSurfaceMode(null)}>Auto</button>
           <button type="button" aria-pressed={surfaceMode === "simple" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("simple")}>Simple</button>
+          <button type="button" aria-pressed={surfaceMode === "outline" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("outline")}>Outline</button>
           <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
         </div>
         <div className="mode-actions">
@@ -812,8 +876,9 @@ export default function App() {
         <span className={`status ${status.state}`} role="status" aria-live="polite">{status.message}</span>
       </nav>
 
-      {surfaceMode === "whiteboard" ? (
-        <section className="workspace whiteboard-workspace">
+      {surfaceMode !== "simple" ? (
+        <>
+        <section className={surfaceMode === "outline" ? "workspace whiteboard-workspace view-hidden" : "workspace whiteboard-workspace"} aria-hidden={surfaceMode === "outline"}>
           <aside className="mindmap-rail" aria-label="Mind-map tools">
             <div className="rail-heading"><span>Mind-map mode</span><button type="button" onClick={() => setHelpOpen(true)} aria-label="Shortcut help">?</button></div>
             <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
@@ -888,6 +953,20 @@ export default function App() {
             <small>Build {__SOURCE_SHA__.slice(0, 8)}</small>
           </aside>
         </section>
+        {surfaceMode === "outline" ? <section className="workspace outline-workspace">
+          <OutlineView
+            elements={activeTab.document.scene.elements}
+            rootNodeId={activeTab.document.rootNodeId}
+            selectedNodeId={simpleSelectedNodeId}
+            onSelect={setSimpleSelectedNodeId}
+            onRename={renameOutlineNode}
+            onMove={moveOutlineNode}
+            onDelete={deleteOutlineNode}
+            onToggleFold={toggleOutlineFold}
+            onExport={exportOutline}
+          />
+        </section> : null}
+        </>
       ) : (
         <section className="workspace simple-workspace">
           <SimpleMindmap

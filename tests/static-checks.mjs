@@ -11,6 +11,7 @@ const betaCommands = await readFile(new URL("../src/commands.ts", import.meta.ur
 const betaOperations = await readFile(new URL("../src/mindmap-operations.ts", import.meta.url), "utf8");
 const betaExports = await readFile(new URL("../src/exports.ts", import.meta.url), "utf8");
 const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
+const outlineView = await readFile(new URL("../src/OutlineView.tsx", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -52,6 +53,10 @@ assert.doesNotMatch(betaExports, /mimeType: "image\/png", quality:/, "PNG export
 assert.match(betaExports, /clipboard-download-fallback/, "Clipboard export must fall back to a PNG download when permission is unavailable");
 assert.match(simpleMindmap, /Simple mind map/, "A non-Excalidraw simple mobile surface must be available");
 assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hierarchy arrows");
+assert.match(betaApp, /surfaceMode === "outline"/, "The active map must expose a synchronised outline surface");
+assert.match(outlineView, /rows\.slice\(start, end\)/, "Large outlines must render a virtual window instead of every row");
+assert.match(outlineView, /Alt\+↑\/↓ reorder/, "The outline must advertise keyboard structural editing");
+assert.match(outlineView, /outlineMarkdown/, "The outline must support independent Markdown export");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
