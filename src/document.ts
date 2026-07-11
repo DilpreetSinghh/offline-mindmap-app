@@ -81,11 +81,26 @@ export function appendBoundConnection(
   const from = elements.find((element) => element.id === fromElementId);
   const to = elements.find((element) => element.id === toElementId);
   if (!from || !to) throw new Error("Cannot bind a connection to missing elements.");
+  const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+  const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+  const boundaryPoint = (element: ExcalidrawElement, towards: { x: number; y: number }) => {
+    const center = { x: element.x + element.width / 2, y: element.y + element.height / 2 };
+    const dx = towards.x - center.x;
+    const dy = towards.y - center.y;
+    const factor = 1 / Math.max(Math.abs(dx) / Math.max(element.width / 2, 1), Math.abs(dy) / Math.max(element.height / 2, 1), 1);
+    return { x: center.x + dx * factor, y: center.y + dy * factor };
+  };
+  const startPoint = boundaryPoint(from, toCenter);
+  const endPoint = boundaryPoint(to, fromCenter);
   const arrow: ExcalidrawElementSkeleton = {
     type: "arrow",
     id: createId(role === "hierarchy" ? "hierarchy" : "relationship"),
-    x: from.x + from.width / 2,
-    y: from.y + from.height / 2,
+    x: startPoint.x,
+    y: startPoint.y,
+    points: [
+      [0, 0],
+      [endPoint.x - startPoint.x, endPoint.y - startPoint.y],
+    ],
     start: { id: fromElementId },
     end: { id: toElementId },
     strokeColor: role === "hierarchy" ? "#8a6b37" : "#2563eb",
@@ -95,10 +110,36 @@ export function appendBoundConnection(
     endArrowhead: "arrow",
     customData: { mindmapConnection: { role, fromNodeId, toNodeId } },
   };
-  return convertToExcalidrawElements(
-    [...elements, arrow] as ExcalidrawElementSkeleton[],
+  const bindingShape = (element: ExcalidrawElement): ExcalidrawElementSkeleton => ({
+    type: element.type === "ellipse" || element.type === "diamond" ? element.type : "rectangle",
+    id: element.id,
+    x: element.x,
+    y: element.y,
+    width: element.width,
+    height: element.height,
+    angle: element.angle,
+    strokeColor: element.strokeColor,
+    backgroundColor: element.backgroundColor,
+  });
+  const converted = convertToExcalidrawElements(
+    [bindingShape(from), bindingShape(to), arrow],
     { regenerateIds: false },
   );
+  const boundArrow = converted.find((element) => element.id === arrow.id);
+  if (!boundArrow || boundArrow.type !== "arrow" || !boundArrow.startBinding || !boundArrow.endBinding) {
+    throw new Error("Excalidraw did not create a normalized bound arrow.");
+  }
+  return [
+    ...elements.map((element) => {
+      if (element.id !== fromElementId && element.id !== toElementId) return element;
+      const existingBindings = element.boundElements?.filter((binding) => binding.id !== boundArrow.id) ?? [];
+      return {
+        ...element,
+        boundElements: [...existingBindings, { id: boundArrow.id, type: "arrow" as const }],
+      } as OrderedExcalidrawElement;
+    }),
+    boundArrow,
+  ];
 }
 
 export function createBlankDocument(name = "Untitled map"): DocumentV3 {
