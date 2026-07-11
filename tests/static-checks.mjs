@@ -9,6 +9,7 @@ const betaDocument = await readFile(new URL("../src/document.ts", import.meta.ur
 const betaDatabase = await readFile(new URL("../src/db.ts", import.meta.url), "utf8");
 const betaCommands = await readFile(new URL("../src/commands.ts", import.meta.url), "utf8");
 const betaOperations = await readFile(new URL("../src/mindmap-operations.ts", import.meta.url), "utf8");
+const betaExports = await readFile(new URL("../src/exports.ts", import.meta.url), "utf8");
 const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
@@ -45,6 +46,10 @@ assert.doesNotMatch(betaCommands, /!modifier && key === "Enter"/, "Plain Enter m
 assert.match(betaCommands, /modifier && key === "Enter"/, "The sibling shortcut must avoid Excalidraw's native Enter action");
 assert.match(betaCommands, /Rearrange mind map/, "Existing maps must expose an explicit spacing repair command");
 assert.match(betaOperations, /shouldReflowAfterInsertion\(direction\)/, "All supported insertion paths must share the reflow policy");
+assert.match(betaOperations, /inferBoundTree/, "Rearrange must include ordinary shapes connected with arrows");
+assert.match(betaExports, /await import\("pdf-lib"\)/, "Modern PDF export must lazy-load its bundled offline PDF engine");
+assert.doesNotMatch(betaExports, /mimeType: "image\/png", quality:/, "PNG export must not pass an ignored quality option");
+assert.match(betaExports, /clipboard-download-fallback/, "Clipboard export must fall back to a PNG download when permission is unavailable");
 assert.match(simpleMindmap, /Simple mind map/, "A non-Excalidraw simple mobile surface must be available");
 assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hierarchy arrows");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");

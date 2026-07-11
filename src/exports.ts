@@ -8,6 +8,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { DocumentV3 } from "./types";
 
 export type ExportFormat = "png" | "svg" | "pdf" | "clipboard" | "excalidraw";
+export type ExportOutcome = "created" | "clipboard-download-fallback";
 
 function safeName(name: string): string {
   return name.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "mind-map";
@@ -30,31 +31,41 @@ function exportState(api: ExcalidrawImperativeAPI) {
   };
 }
 
-export async function exportScene(api: ExcalidrawImperativeAPI, name: string, format: ExportFormat): Promise<void> {
+export async function exportScene(api: ExcalidrawImperativeAPI, name: string, format: ExportFormat): Promise<ExportOutcome> {
   const state = exportState(api);
   const filename = safeName(name);
   if (format === "clipboard") {
-    await exportToClipboard({ ...state, type: "png" });
-    return;
+    try {
+      await Promise.race([
+        exportToClipboard({ ...state, type: "png" }),
+        new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Clipboard export timed out.")), 3_000)),
+      ]);
+      return "created";
+    } catch {
+      const png = await exportToBlob({ ...state, mimeType: "image/png" });
+      if (!png) throw new Error("Clipboard and fallback PNG export failed.");
+      downloadBlob(png, `${filename}.png`);
+      return "clipboard-download-fallback";
+    }
   }
   if (format === "excalidraw") {
     const json = serializeAsJSON(state.elements, state.appState, state.files, "local");
     downloadBlob(new Blob([json], { type: "application/json" }), `${filename}.excalidraw`);
-    return;
+    return "created";
   }
   if (format === "svg") {
     const svg = await exportToSvg(state);
     downloadBlob(new Blob([svg.outerHTML], { type: "image/svg+xml" }), `${filename}.svg`);
-    return;
+    return "created";
   }
-  const png = await exportToBlob({ ...state, mimeType: "image/png", quality: 1 });
+  const png = await exportToBlob({ ...state, mimeType: "image/png" });
   if (!png) throw new Error("PNG export failed.");
   if (format === "png") {
     downloadBlob(png, `${filename}.png`);
-    return;
+    return "created";
   }
-  if (!window.PDFLib?.PDFDocument) throw new Error("The local PDF exporter is unavailable.");
-  const pdf = await window.PDFLib.PDFDocument.create();
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
   const image = await pdf.embedPng(await png.arrayBuffer());
   const pageWidth = 842;
   const pageHeight = 595;
@@ -66,6 +77,7 @@ export async function exportScene(api: ExcalidrawImperativeAPI, name: string, fo
   const bytes = await pdf.save();
   const buffer = new Uint8Array(bytes).buffer;
   downloadBlob(new Blob([buffer], { type: "application/pdf" }), `${filename}.pdf`);
+  return "created";
 }
 
 export function downloadNativeBackup(documents: DocumentV3[]): void {

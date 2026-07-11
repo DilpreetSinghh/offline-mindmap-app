@@ -7,6 +7,7 @@ import { appendBoundConnection, createId, createMindmapElements, getMindmapConne
 import {
   addConnectedMindmapNode,
   getMindmapNodeText,
+  reflowConnectedMindmapTree,
   reflowMindmapElements,
   removeMindmapSubtree,
 } from "./mindmap-operations";
@@ -244,17 +245,19 @@ function addRelationship(context: CommandContext): void {
 
 function reflowMap(context: CommandContext): void {
   const elements = context.api.getSceneElements();
-  const nodes = elements.filter((element) => getMindmapNode(element));
-  if (nodes.length < 2) {
-    context.announce("Add at least one child before rearranging the map.", "error");
+  const rootNodeId = elements.map(getMindmapNode).find((node) => node?.parentNodeId === null)?.nodeId;
+  const result = reflowConnectedMindmapTree(elements, rootNodeId);
+  if (result.nodeCount < 2) {
+    context.announce("Connect at least two shapes, or point an arrow endpoint at each shape, then rearrange again.", "error");
     return;
   }
   const selectedIds = Object.keys(context.api.getAppState().selectedElementIds);
-  const next = reflowMindmapElements(elements);
-  transact(context.api, next, selectedIds);
-  const arrangedNodes = next.filter((element) => getMindmapNode(element));
+  transact(context.api, result.elements, selectedIds);
+  const arrangedNodes = result.elements.filter((element) => getMindmapNode(element));
   context.api.scrollToContent(arrangedNodes, { animate: true, fitToContent: true, maxZoom: 1 });
-  context.announce("Mind map rearranged with space for every subtree.");
+  context.announce(result.includedWhiteboardNodeCount
+    ? `Mind map rearranged with ${result.includedWhiteboardNodeCount} connected whiteboard shape(s) included.`
+    : "Mind map rearranged with space for every subtree.");
 }
 
 export const commandRegistry: readonly Command[] = [

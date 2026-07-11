@@ -9,6 +9,7 @@ import {
   refreshMindmapConnectionGeometry,
 } from "./document";
 import { calculateTreeLayout, shouldReflowAfterInsertion } from "./tree-layout.mjs";
+import { inferBoundTree } from "./bound-tree.mjs";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
 
@@ -146,6 +147,47 @@ export function reflowMindmapElements(
     return element;
   });
   return refreshMindmapConnectionGeometry(moved);
+}
+
+export function reflowConnectedMindmapTree(
+  elements: readonly OrderedExcalidrawElement[],
+  requestedRootNodeId?: string,
+): { elements: OrderedExcalidrawElement[]; includedWhiteboardNodeCount: number; nodeCount: number } {
+  const inferred = inferBoundTree(elements, requestedRootNodeId);
+  if (!inferred || inferred.records.length < 2) {
+    return { elements: [...elements], includedWhiteboardNodeCount: 0, nodeCount: inferred?.records.length ?? 0 };
+  }
+
+  const elementById = new Map(elements.map((element) => [element.id, element]));
+  const positions = calculateTreeLayout(inferred.records, inferred.rootNodeId);
+  const deltaByElementId = new Map<string, { x: number; y: number }>();
+  for (const record of inferred.records) {
+    const position = positions.get(record.nodeId);
+    if (position) deltaByElementId.set(record.elementId, { x: position.x - record.x, y: position.y - record.y });
+  }
+
+  const inferredConnections = new Map<string, { fromElementId: string; toElementId: string }>();
+  for (const [targetElementId, arrowId] of inferred.treeArrowIdByTarget) {
+    const fromElementId = inferred.parentElementId.get(targetElementId);
+    if (fromElementId) inferredConnections.set(arrowId, { fromElementId, toElementId: targetElementId });
+  }
+
+  const moved = elements.map((element) => {
+    const delta = deltaByElementId.get(element.id)
+      ?? (element.type === "text" && element.containerId ? deltaByElementId.get(element.containerId) : undefined);
+    if (!delta || (!delta.x && !delta.y)) return element;
+    return newElementWith(element, { x: element.x + delta.x, y: element.y + delta.y }) as OrderedExcalidrawElement;
+  });
+  let includedWhiteboardNodeCount = 0;
+  for (const record of inferred.records) {
+    const element = elementById.get(record.elementId);
+    if (element && !getMindmapNode(element)) includedWhiteboardNodeCount += 1;
+  }
+  return {
+    elements: refreshMindmapConnectionGeometry(moved, inferredConnections),
+    includedWhiteboardNodeCount,
+    nodeCount: inferred.records.length,
+  };
 }
 
 export function addConnectedMindmapNode(

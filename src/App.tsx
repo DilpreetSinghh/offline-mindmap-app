@@ -159,6 +159,7 @@ export default function App() {
   }, [activeTab, simpleSelectedNodeId]);
 
   const announce = useCallback((message: string, state: "saved" | "error" = "saved") => {
+    explicitStatusUntilRef.current = Date.now() + 3_000;
     setStatus({ message, state });
   }, []);
 
@@ -510,8 +511,10 @@ export default function App() {
     const tab = activeTabRef.current;
     if (!api || !tab) return;
     try {
-      await exportScene(api, tab.document.name, exportFormat);
-      announce(exportFormat === "clipboard" ? "Canvas copied to clipboard." : `${exportFormat.toUpperCase()} export created.`);
+      const outcome = await exportScene(api, tab.document.name, exportFormat);
+      announce(outcome === "clipboard-download-fallback"
+        ? "Clipboard unavailable; PNG downloaded instead."
+        : exportFormat === "clipboard" ? "Canvas copied to clipboard." : `${exportFormat.toUpperCase()} export created.`);
     } catch (error) {
       announce(`Export failed: ${error instanceof Error ? error.message : String(error)}`, "error");
     }

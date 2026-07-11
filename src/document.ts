@@ -144,26 +144,36 @@ export function appendBoundConnection(
 
 export function refreshMindmapConnectionGeometry(
   elements: readonly OrderedExcalidrawElement[],
+  inferredConnections?: ReadonlyMap<string, { fromElementId: string; toElementId: string }>,
 ): OrderedExcalidrawElement[] {
   const shapeByNodeId = new Map<string, OrderedExcalidrawElement>();
+  const shapeByElementId = new Map<string, OrderedExcalidrawElement>();
   for (const element of elements) {
     const node = getMindmapNode(element);
     if (node) shapeByNodeId.set(node.nodeId, element);
+    if (element.type === "rectangle" || element.type === "ellipse" || element.type === "diamond") {
+      shapeByElementId.set(element.id, element);
+    }
   }
   return elements.map((element) => {
     const connection = getMindmapConnection(element);
-    if (!connection || element.type !== "arrow") return element;
-    const from = shapeByNodeId.get(connection.fromNodeId);
-    const to = shapeByNodeId.get(connection.toNodeId);
+    const inferred = inferredConnections?.get(element.id);
+    if (element.type !== "arrow" || (!inferred && (!element.startBinding || !element.endBinding))) return element;
+    const from = connection
+      ? shapeByNodeId.get(connection.fromNodeId)
+      : shapeByElementId.get(inferred?.fromElementId ?? element.startBinding!.elementId);
+    const to = connection
+      ? shapeByNodeId.get(connection.toNodeId)
+      : shapeByElementId.get(inferred?.toElementId ?? element.endBinding!.elementId);
     if (!from || !to) return element;
 
     const rebuilt = appendBoundConnection(
       [from, to],
       from.id,
       to.id,
-      connection.fromNodeId,
-      connection.toNodeId,
-      connection.role,
+      connection?.fromNodeId ?? from.id,
+      connection?.toNodeId ?? to.id,
+      connection?.role ?? "hierarchy",
     ).find((candidate) => candidate.type === "arrow");
     if (!rebuilt || rebuilt.type !== "arrow") return element;
     return newElementWith(element, {
