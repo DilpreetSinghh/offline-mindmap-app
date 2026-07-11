@@ -39,11 +39,25 @@
       if (node.parentId !== null && node.parentId !== undefined && typeof node.parentId !== "string") {
         errors.push(`Node ${node.id || "(unknown)"} has an invalid parent ID.`);
       }
+      if (node.order !== undefined && !Number.isFinite(node.order)) {
+        errors.push(`Node ${node.id || "(unknown)"} has an invalid sibling order.`);
+      }
     }
 
+    const nodesById = new Map(state.nodes.filter(Boolean).map((node) => [node.id, node]));
     for (const node of state.nodes) {
       if (node && node.parentId && !ids.has(node.parentId)) {
         errors.push(`Node ${node.id} refers to missing parent ${node.parentId}.`);
+      }
+      const visited = new Set();
+      let current = node;
+      while (current && current.parentId) {
+        if (visited.has(current.id)) {
+          errors.push(`Hierarchy cycle detected at node ${current.id}.`);
+          break;
+        }
+        visited.add(current.id);
+        current = nodesById.get(current.parentId);
       }
     }
     for (const connection of state.connections) {

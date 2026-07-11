@@ -17,6 +17,7 @@ assert.ok(
   "index.html must load the vendored pdf-lib bundle"
 );
 assert.ok(scriptSources.includes("storage.js"), "index.html must load the storage module");
+assert.ok(scriptSources.includes("hierarchy.js"), "index.html must load the hierarchy module");
 
 await access(new URL("../vendor/pdf-lib.min.js", import.meta.url));
 await access(new URL("../vendor/pdf-lib.LICENSE.md", import.meta.url));

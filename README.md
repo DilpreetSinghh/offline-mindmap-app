@@ -51,6 +51,13 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
   - **Delete / Backspace** – delete the selected node (and its descendants), protected so the root cannot be removed.[cite:168]
   - **Ctrl/Cmd+Z** – undo, **Ctrl/Cmd+Shift+Z** – redo.[cite:168]
   - **Esc** – clear the current selection.
+  - **Shift+Alt+← / →** – outdent or indent the selected node.
+  - **Shift+Alt+↑ / ↓** – move the selected node before or after its sibling.
+
+- **Structural editing**
+  - Drag a node onto another node to reparent its complete subtree.
+  - Valid drop targets receive a green outline; self-links and hierarchy cycles are blocked.
+  - Explicit sibling order persists through layout, autosave, backup, and restore.
 
 - **Navigation and zooming**
   - **Pan** by dragging the canvas background with mouse or single-finger touch.

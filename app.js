@@ -53,6 +53,19 @@
     validateMaps,
     validateWorkspace,
   } = window.MindMapStorage;
+  const {
+    canReparent: canReparentNode,
+    getChildren: getOrderedChildren,
+    getDescendantIds,
+    getLowestCommonAncestorId,
+    indentNode: indentHierarchyNode,
+    moveSibling: moveHierarchySibling,
+    nextSiblingOrder,
+    normaliseAllOrders,
+    normaliseSiblingOrders,
+    outdentNode: outdentHierarchyNode,
+    reparentNode: reparentHierarchyNode,
+  } = window.MindMapHierarchy;
 
   // Tabs: each tab keeps its own state object and optional storage id
   let tabs = [];
@@ -94,6 +107,7 @@
   let hoverNodeId = null;
   let hoverHandleDirection = null;
   let showHandles = true;
+  let dropTargetNodeId = null;
 
   // Auto-layout
   let autoLayoutTimer = null;
@@ -249,6 +263,7 @@
     if (!validation.valid) throw new Error(validation.errors.join("\n"));
     closeInlineEditor(false);
     tabs = JSON.parse(JSON.stringify(workspace.tabs));
+    for (const tab of tabs) normaliseAllOrders(tab.state.nodes);
     activeTabIndex = workspace.activeTabIndex;
     state = tabs[activeTabIndex].state;
     history = [];
@@ -303,6 +318,7 @@
         textColor: state.nodeTextColor,
         fontSize: state.fontSize,
         parentId: null,
+        order: 0,
       },
     ];
     state.connections = [];
@@ -376,7 +392,7 @@
     const ms = Math.max(1, state.autoLayoutIntervalSec || 10) * 1000;
     autoLayoutTimer = setInterval(() => {
       if (!state.nodes.length) return;
-      applyLayout(state.layoutMode || "tree");
+      applyLayout(state.layoutMode || "tree", true);
     }, ms);
   }
 
@@ -551,9 +567,10 @@
       textColor: state.nodeTextColor,
       fontSize: state.fontSize,
       parentId: parent.id,
+      order: nextSiblingOrder(state.nodes, parent.id),
     };
     state.nodes.push(node);
-    state.connections.push({ from: parent.id, to: id });
+    state.connections.push({ from: parent.id, to: id, kind: "hierarchy" });
     state.selectedNodeId = id;
     scheduleDraw();
     openInlineEditor(node);
@@ -576,10 +593,12 @@
       textColor: state.nodeTextColor,
       fontSize: state.fontSize,
       parentId: parent ? parent.id : node.parentId,
+      order: (Number.isFinite(node.order) ? node.order : 0) + 0.5,
     };
     state.nodes.push(newNode);
+    normaliseSiblingOrders(state.nodes, newNode.parentId);
     if (parent) {
-      state.connections.push({ from: parent.id, to: id });
+      state.connections.push({ from: parent.id, to: id, kind: "hierarchy" });
     }
     state.selectedNodeId = id;
     scheduleDraw();
@@ -618,6 +637,43 @@
     scheduleDraw();
   }
 
+  function applyHierarchyCommand(command) {
+    const draftNodes = JSON.parse(JSON.stringify(state.nodes));
+    const draftConnections = JSON.parse(JSON.stringify(state.connections));
+    const selectedNodeBefore = getNodeById(state.selectedNodeId);
+    const oldParentId = selectedNodeBefore ? selectedNodeBefore.parentId : null;
+    let changed = false;
+    if (command === "indent") {
+      changed = indentHierarchyNode(draftNodes, draftConnections, state.selectedNodeId);
+    } else if (command === "outdent") {
+      changed = outdentHierarchyNode(draftNodes, draftConnections, state.selectedNodeId);
+    } else if (command === "up") {
+      changed = moveHierarchySibling(draftNodes, state.selectedNodeId, -1);
+    } else if (command === "down") {
+      changed = moveHierarchySibling(draftNodes, state.selectedNodeId, 1);
+    }
+    if (!changed) return false;
+
+    pushHistory();
+    state.nodes = draftNodes;
+    state.connections = draftConnections;
+    const selectedNodeAfter = getNodeById(state.selectedNodeId);
+    const newParentId = selectedNodeAfter ? selectedNodeAfter.parentId : null;
+    const affectedBranchId = getLowestCommonAncestorId(
+      state.nodes,
+      oldParentId,
+      newParentId
+    );
+    if (state.autoLayoutEnabled) {
+      applyLayout(state.layoutMode || "tree", true, affectedBranchId);
+    } else if (state.layoutMode !== "free") {
+      applyLayout(state.layoutMode || "tree", true);
+    } else {
+      scheduleDraw();
+    }
+    return true;
+  }
+
   function draw() {
     const width = canvas.width / window.devicePixelRatio;
     const height = canvas.height / window.devicePixelRatio;
@@ -654,6 +710,7 @@
     for (const node of state.nodes) {
       const isSelected = node.id === state.selectedNodeId;
       const isHovered = node.id === hoverNodeId;
+      const isDropTarget = node.id === dropTargetNodeId;
       ctx.save();
       const radius = NODE_RADIUS;
       const rx = radius * 1.3;
@@ -672,8 +729,8 @@
       ctx.globalAlpha = 0.96;
       ctx.fill();
       ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = isSelected ? "#2563eb" : borderColor;
-      ctx.lineWidth = isSelected ? 3 : 1.5;
+      ctx.strokeStyle = isDropTarget ? "#22c55e" : isSelected ? "#2563eb" : borderColor;
+      ctx.lineWidth = isDropTarget ? 4 : isSelected ? 3 : 1.5;
       ctx.stroke();
 
       ctx.fillStyle = textColor;
@@ -836,6 +893,26 @@
     return null;
   }
 
+  function findReparentTargetAt(canvasX, canvasY, draggedNodeId) {
+    if (!draggedNodeId) return null;
+    const { x, y } = screenToWorld(canvasX, canvasY);
+    for (let index = state.nodes.length - 1; index >= 0; index--) {
+      const candidate = state.nodes[index];
+      if (!canReparentNode(state.nodes, draggedNodeId, candidate.id)) continue;
+      const rx = NODE_RADIUS * 1.3;
+      const ry = NODE_RADIUS * 0.8;
+      if (
+        x >= candidate.x - rx &&
+        x <= candidate.x + rx &&
+        y >= candidate.y - ry &&
+        y <= candidate.y + ry
+      ) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
   // Pointer interactions --------------------------------------------------
 
   let isPanning = false;
@@ -909,6 +986,7 @@
       pushHistory();
       isDraggingNode = true;
       dragNodeId = node.id;
+      dropTargetNodeId = null;
       state.selectedNodeId = node.id;
       showHandles = true;
       scheduleDraw();
@@ -981,6 +1059,8 @@
         const worldPrev = screenToWorld(x - dx, y - dy);
         node.x += worldDelta.x - worldPrev.x;
         node.y += worldDelta.y - worldPrev.y;
+        const target = findReparentTargetAt(x, y, dragNodeId);
+        dropTargetNodeId = target ? target.id : null;
         scheduleDraw();
       }
     } else if (isPanning) {
@@ -991,9 +1071,33 @@
   }
 
   function handlePointerUp() {
+    const draggedNodeId = dragNodeId;
+    const targetNodeId = dropTargetNodeId;
     isPanning = false;
     isDraggingNode = false;
     dragNodeId = null;
+    dropTargetNodeId = null;
+    if (draggedNodeId && targetNodeId) {
+      const draggedNode = getNodeById(draggedNodeId);
+      const oldParentId = draggedNode ? draggedNode.parentId : null;
+      const changed = reparentHierarchyNode(
+        state.nodes,
+        state.connections,
+        draggedNodeId,
+        targetNodeId
+      );
+      if (changed && state.autoLayoutEnabled) {
+        const affectedBranchId = getLowestCommonAncestorId(
+          state.nodes,
+          oldParentId,
+          targetNodeId
+        );
+        applyLayout(state.layoutMode || "tree", true, affectedBranchId);
+      } else if (changed && state.layoutMode !== "free") {
+        applyLayout(state.layoutMode || "tree", true);
+      }
+    }
+    scheduleDraw();
   }
 
   // Inline editing --------------------------------------------------------
@@ -1164,11 +1268,7 @@
     if (!state.nodes.length) return { root: null, maxDepth: 0 };
     const root = state.nodes.find((n) => !n.parentId) || state.nodes[0];
     const childMap = {};
-    for (const node of state.nodes) {
-      if (!node.parentId) continue;
-      if (!childMap[node.parentId]) childMap[node.parentId] = [];
-      childMap[node.parentId].push(node);
-    }
+    for (const node of state.nodes) childMap[node.id] = getOrderedChildren(state.nodes, node.id);
     let maxDepth = 0;
     function dfs(node, depth) {
       node._depth = depth;
@@ -1180,15 +1280,28 @@
     return { root, maxDepth };
   }
 
-  function applyLayout(mode) {
+  function applyLayout(mode, skipHistory, branchRootId) {
     if (!state.nodes.length) return;
-    pushHistory();
+    if (!skipHistory) pushHistory();
+
+    const branchRoot = branchRootId ? getNodeById(branchRootId) : null;
+    const affectedIds = branchRoot
+      ? new Set([branchRoot.id, ...getDescendantIds(state.nodes, branchRoot.id)])
+      : null;
+    const branchAnchor = branchRoot ? { x: branchRoot.x, y: branchRoot.y } : null;
+    const fixedPositions = affectedIds
+      ? new Map(
+          state.nodes
+            .filter((node) => !affectedIds.has(node.id))
+            .map((node) => [node.id, { x: node.x, y: node.y }])
+        )
+      : null;
 
     const root = state.nodes.find((n) => !n.parentId) || state.nodes[0];
     const centreX = root.x;
     const centreY = root.y;
 
-    const directChildren = state.nodes.filter((n) => n.parentId === root.id);
+    const directChildren = getOrderedChildren(state.nodes, root.id);
     const others = state.nodes.filter((n) => n.parentId && n.parentId !== root.id);
 
     if (mode === "radial") {
@@ -1203,11 +1316,7 @@
       const rootNode = treeRoot || root;
       const rootDepth = rootNode._depth || 0;
       const childMap = {};
-      for (const node of state.nodes) {
-        if (!node.parentId) continue;
-        if (!childMap[node.parentId]) childMap[node.parentId] = [];
-        childMap[node.parentId].push(node);
-      }
+      for (const node of state.nodes) childMap[node.id] = getOrderedChildren(state.nodes, node.id);
       let indexCounter = 0;
       function dfsIndex(node) {
         const children = childMap[node.id] || [];
@@ -1271,6 +1380,22 @@
         node.x = parent.x + Math.cos(angle) * distance;
         node.y = parent.y + Math.sin(angle) * distance;
       });
+    }
+
+    if (affectedIds && branchAnchor) {
+      const laidOutRoot = getNodeById(branchRoot.id);
+      const offsetX = branchAnchor.x - laidOutRoot.x;
+      const offsetY = branchAnchor.y - laidOutRoot.y;
+      for (const node of state.nodes) {
+        if (affectedIds.has(node.id)) {
+          node.x += offsetX;
+          node.y += offsetY;
+        } else {
+          const fixed = fixedPositions.get(node.id);
+          node.x = fixed.x;
+          node.y = fixed.y;
+        }
+      }
     }
 
     scheduleDraw();
@@ -1630,6 +1755,7 @@
     if (!match) return;
 
     state = match.data;
+    normaliseAllOrders(state.nodes);
     const name = match.name || "Untitled";
     const existingIndex = tabs.findIndex((t) => t.id === id);
     if (existingIndex >= 0) {
@@ -1828,6 +1954,14 @@
   document.addEventListener("keydown", (e) => {
     if (inlineEditor) return;
 
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.matches("input, select, textarea, button") || target.isContentEditable)
+    ) {
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       if (e.shiftKey) {
@@ -1840,6 +1974,17 @@
 
     const node = getNodeById(state.selectedNodeId);
     if (!node) return;
+    if (e.altKey && e.shiftKey && e.key.startsWith("Arrow")) {
+      const commands = {
+        ArrowLeft: "outdent",
+        ArrowRight: "indent",
+        ArrowUp: "up",
+        ArrowDown: "down",
+      };
+      e.preventDefault();
+      applyHierarchyCommand(commands[e.key]);
+      return;
+    }
     if (e.key === "Tab") {
       e.preventDefault();
       addChildNode(node);

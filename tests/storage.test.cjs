@@ -42,6 +42,16 @@ test("rejects missing parents and invalid connections", () => {
   assert.match(validation.errors.join(" "), /missing parent/);
 });
 
+test("rejects hierarchy cycles", () => {
+  const invalid = state();
+  invalid.nodes.push({ id: "child", text: "Child", x: 10, y: 10, parentId: "root", order: 0 });
+  invalid.nodes[0].parentId = "child";
+  invalid.connections.push({ from: "root", to: "child" });
+  const validation = validateState(invalid);
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join(" "), /cycle/i);
+});
+
 test("creates and validates a versioned native backup", () => {
   const backup = createBackup([], workspace(), "2026-07-11T00:00:00.000Z");
   assert.equal(backup.format, BACKUP_FORMAT);
