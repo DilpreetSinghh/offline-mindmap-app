@@ -253,7 +253,8 @@ function reflowMap(context: CommandContext): void {
   }
   const selectedIds = Object.keys(context.api.getAppState().selectedElementIds);
   transact(context.api, result.elements, selectedIds);
-  const arrangedNodes = result.elements.filter((element) => getMindmapNode(element));
+  const arrangedElementIds = new Set(result.arrangedElementIds);
+  const arrangedNodes = result.elements.filter((element) => arrangedElementIds.has(element.id));
   context.api.scrollToContent(arrangedNodes, { animate: true, fitToContent: true, maxZoom: 1 });
   context.announce(result.includedWhiteboardNodeCount
     ? `Mind map rearranged with ${result.includedWhiteboardNodeCount} connected whiteboard shape(s) included.`

@@ -47,25 +47,26 @@ function arrowEndpoint(element, index) {
 export function inferBoundTree(elements, requestedRootNodeId) {
   const shapes = elements.filter((element) => !element.isDeleted && NODE_SHAPES.has(element.type));
   const shapeById = new Map(shapes.map((shape) => [shape.id, shape]));
-  const rootShape = requestedRootNodeId
-    ? shapes.find((shape) => mindmapNode(shape)?.nodeId === requestedRootNodeId)
-    : shapes.find((shape) => mindmapNode(shape)?.parentNodeId === null);
-  if (!rootShape) return null;
-
   const outgoing = new Map();
+  const incomingCount = new Map(shapes.map((shape) => [shape.id, 0]));
   for (const element of elements) {
     if (element.isDeleted || element.type !== "arrow") continue;
     if (mindmapConnection(element)?.role === "relationship") continue;
     const startPoint = arrowEndpoint(element, 0);
     const endPoint = arrowEndpoint(element, -1) ?? arrowEndpoint(element, (element.points?.length ?? 1) - 1);
-    const fromId = element.startBinding?.elementId
-      ?? (startPoint ? shapeAtArrowEndpoint(shapes, startPoint) : null);
-    const toId = element.endBinding?.elementId
-      ?? (endPoint ? shapeAtArrowEndpoint(shapes, endPoint, fromId) : null);
+    const boundFromId = element.startBinding?.elementId;
+    const boundToId = element.endBinding?.elementId;
+    const fromId = boundFromId && shapeById.has(boundFromId)
+      ? boundFromId
+      : startPoint ? shapeAtArrowEndpoint(shapes, startPoint) : null;
+    const toId = boundToId && shapeById.has(boundToId)
+      ? boundToId
+      : endPoint ? shapeAtArrowEndpoint(shapes, endPoint, fromId) : null;
     if (!fromId || !toId || fromId === toId || !shapeById.has(fromId) || !shapeById.has(toId)) continue;
     const edges = outgoing.get(fromId) ?? [];
     edges.push({ arrowId: element.id, toId });
     outgoing.set(fromId, edges);
+    incomingCount.set(toId, (incomingCount.get(toId) ?? 0) + 1);
   }
   for (const edges of outgoing.values()) {
     edges.sort((a, b) => {
@@ -74,6 +75,39 @@ export function inferBoundTree(elements, requestedRootNodeId) {
       return first.y - second.y || first.x - second.x || a.toId.localeCompare(b.toId);
     });
   }
+
+  const requestedRoot = requestedRootNodeId
+    ? shapes.find((shape) => mindmapNode(shape)?.nodeId === requestedRootNodeId)
+    : null;
+  const semanticRoot = shapes.find((shape) => mindmapNode(shape)?.parentNodeId === null);
+  const nativeRootCandidates = shapes.filter((shape) => outgoing.has(shape.id) && (incomingCount.get(shape.id) ?? 0) === 0);
+  const fallbackCandidates = nativeRootCandidates.length
+    ? nativeRootCandidates
+    : shapes.filter((shape) => outgoing.has(shape.id));
+  const reachableCount = (startId) => {
+    const visited = new Set([startId]);
+    const queue = [startId];
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      for (const edge of outgoing.get(queue[cursor]) ?? []) {
+        if (visited.has(edge.toId)) continue;
+        visited.add(edge.toId);
+        queue.push(edge.toId);
+      }
+    }
+    return visited.size;
+  };
+  fallbackCandidates.sort((a, b) => (
+    reachableCount(b.id) - reachableCount(a.id)
+    || a.x - b.x
+    || a.y - b.y
+    || a.id.localeCompare(b.id)
+  ));
+  const rootShape = requestedRoot && reachableCount(requestedRoot.id) > 1
+    ? requestedRoot
+    : semanticRoot && reachableCount(semanticRoot.id) > 1
+      ? semanticRoot
+      : fallbackCandidates[0] ?? requestedRoot ?? semanticRoot;
+  if (!rootShape) return null;
 
   const parentElementId = new Map([[rootShape.id, null]]);
   const treeArrowIdByTarget = new Map();

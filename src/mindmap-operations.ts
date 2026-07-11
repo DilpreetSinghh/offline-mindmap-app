@@ -152,10 +152,10 @@ export function reflowMindmapElements(
 export function reflowConnectedMindmapTree(
   elements: readonly OrderedExcalidrawElement[],
   requestedRootNodeId?: string,
-): { elements: OrderedExcalidrawElement[]; includedWhiteboardNodeCount: number; nodeCount: number } {
+): { elements: OrderedExcalidrawElement[]; includedWhiteboardNodeCount: number; nodeCount: number; arrangedElementIds: string[] } {
   const inferred = inferBoundTree(elements, requestedRootNodeId);
   if (!inferred || inferred.records.length < 2) {
-    return { elements: [...elements], includedWhiteboardNodeCount: 0, nodeCount: inferred?.records.length ?? 0 };
+    return { elements: [...elements], includedWhiteboardNodeCount: 0, nodeCount: inferred?.records.length ?? 0, arrangedElementIds: [] };
   }
 
   const elementById = new Map(elements.map((element) => [element.id, element]));
@@ -187,6 +187,7 @@ export function reflowConnectedMindmapTree(
     elements: refreshMindmapConnectionGeometry(moved, inferredConnections),
     includedWhiteboardNodeCount,
     nodeCount: inferred.records.length,
+    arrangedElementIds: inferred.records.map((record) => record.elementId),
   };
 }
 
