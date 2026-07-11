@@ -7,6 +7,8 @@ const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const betaApp = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const betaDocument = await readFile(new URL("../src/document.ts", import.meta.url), "utf8");
 const betaDatabase = await readFile(new URL("../src/db.ts", import.meta.url), "utf8");
+const betaCommands = await readFile(new URL("../src/commands.ts", import.meta.url), "utf8");
+const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -29,10 +31,19 @@ assert.match(html, />Save locally<\/button>/, "The explicit map save action must
 assert.match(html, />Save as copy<\/button>/, "The toolbar must expose Save as copy");
 assert.match(betaHtml, /name="source-commit" content="__SOURCE_SHA__"/, "The deploy build must expose its source SHA");
 assert.match(betaHtml, /src="\/src\/main\.tsx"/, "The public beta must boot the Vite React editor");
+assert.doesNotMatch(betaHtml, /Whiteboard Beta/, "The modern editor must be presented as the default experience");
 assert.match(betaApp, /<Excalidraw/, "The public beta must embed Excalidraw core");
 assert.match(betaApp, /Classic recovery/, "The public beta must retain a classic recovery path");
 assert.match(betaApp, /Save locally/, "The public beta must expose local named-map save");
 assert.match(betaApp, /Save as copy/, "The public beta must expose save-as-copy");
+assert.match(betaApp, /surfaceMode === "whiteboard"/, "The default app must support whiteboard and simple views");
+assert.match(betaApp, /detectsMobileUse/, "The app must automatically detect mobile use");
+assert.match(betaApp, /editingTextElement:\s*null/, "Transient text-editing state must not survive recovery or reload");
+assert.doesNotMatch(betaApp, /context-menu/, "The app must not layer a custom context menu over Excalidraw");
+assert.doesNotMatch(betaCommands, /!modifier && key === "Enter"/, "Plain Enter must remain available to Excalidraw text editing");
+assert.match(betaCommands, /modifier && key === "Enter"/, "The sibling shortcut must avoid Excalidraw's native Enter action");
+assert.match(simpleMindmap, /Simple mind map/, "A non-Excalidraw simple mobile surface must be available");
+assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hierarchy arrows");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");

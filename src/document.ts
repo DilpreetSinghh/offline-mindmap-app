@@ -1,4 +1,4 @@
-import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
+import { convertToExcalidrawElements, newElementWith } from "@excalidraw/excalidraw";
 import type { ExcalidrawElementSkeleton } from "@excalidraw/excalidraw/data/transform";
 import type {
   ExcalidrawElement,
@@ -140,6 +140,43 @@ export function appendBoundConnection(
     }),
     boundArrow,
   ];
+}
+
+export function refreshMindmapConnectionGeometry(
+  elements: readonly OrderedExcalidrawElement[],
+): OrderedExcalidrawElement[] {
+  const shapeByNodeId = new Map<string, OrderedExcalidrawElement>();
+  for (const element of elements) {
+    const node = getMindmapNode(element);
+    if (node) shapeByNodeId.set(node.nodeId, element);
+  }
+  return elements.map((element) => {
+    const connection = getMindmapConnection(element);
+    if (!connection || element.type !== "arrow") return element;
+    const from = shapeByNodeId.get(connection.fromNodeId);
+    const to = shapeByNodeId.get(connection.toNodeId);
+    if (!from || !to) return element;
+
+    const rebuilt = appendBoundConnection(
+      [from, to],
+      from.id,
+      to.id,
+      connection.fromNodeId,
+      connection.toNodeId,
+      connection.role,
+    ).find((candidate) => candidate.type === "arrow");
+    if (!rebuilt || rebuilt.type !== "arrow") return element;
+    return newElementWith(element, {
+      x: rebuilt.x,
+      y: rebuilt.y,
+      width: rebuilt.width,
+      height: rebuilt.height,
+      points: rebuilt.points,
+      startBinding: rebuilt.startBinding,
+      endBinding: rebuilt.endBinding,
+      lastCommittedPoint: rebuilt.lastCommittedPoint,
+    }) as OrderedExcalidrawElement;
+  });
 }
 
 export function createBlankDocument(name = "Untitled map"): DocumentV3 {

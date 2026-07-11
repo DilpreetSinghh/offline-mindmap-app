@@ -30,13 +30,67 @@ import {
 } from "./db";
 import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
 import type { DocumentV3, EditorTab } from "./types";
+import SimpleMindmap from "./SimpleMindmap";
+import {
+  addConnectedMindmapNode,
+  ensureEditableMindmapElements,
+  removeMindmapSubtree,
+  renameMindmapNode,
+} from "./mindmap-operations";
 import "./app.css";
 
 const EDITOR_MODE_KEY = "offline-mindmap-editor-mode-v1";
+const SURFACE_MODE_KEY = "offline-mindmap-surface-mode-v1";
 const AUTOSAVE_DELAY = 600;
 
 type Status = { message: string; state: "" | "saved" | "error" };
-type ContextMenuState = { x: number; y: number } | null;
+type SurfaceMode = "simple" | "whiteboard";
+
+function detectsMobileUse(): boolean {
+  return window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+}
+
+function readSurfaceOverride(): SurfaceMode | null {
+  const stored = localStorage.getItem(SURFACE_MODE_KEY);
+  return stored === "simple" || stored === "whiteboard" ? stored : null;
+}
+
+function cleanPersistedAppState(appState: Partial<AppState>): Partial<AppState> {
+  return {
+    ...appState,
+    contextMenu: null,
+    activeEmbeddable: null,
+    newElement: null,
+    resizingElement: null,
+    multiElement: null,
+    selectionElement: null,
+    startBoundElement: null,
+    suggestedBindings: [],
+    frameToHighlight: null,
+    editingFrame: null,
+    elementsToHighlight: null,
+    editingTextElement: null,
+    editingLinearElement: null,
+    openMenu: null,
+    openPopup: null,
+    openDialog: null,
+    pendingImageElementId: null,
+    selectedLinearElement: null,
+    showHyperlinkPopup: false,
+    toast: null,
+  };
+}
+
+function prepareDocument(document: DocumentV3): DocumentV3 {
+  return {
+    ...document,
+    scene: {
+      ...document.scene,
+      elements: ensureEditableMindmapElements(document.scene.elements),
+      appState: cleanPersistedAppState(document.scene.appState),
+    },
+  };
+}
 
 function formatTime(date = new Date()): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -53,7 +107,7 @@ function currentSceneDocument(tab: EditorTab, api: ExcalidrawImperativeAPI): Doc
     updatedAt: new Date().toISOString(),
     scene: {
       elements: api.getSceneElements(),
-      appState: api.getAppState(),
+      appState: cleanPersistedAppState(api.getAppState()),
       files: api.getFiles(),
     },
   };
@@ -69,6 +123,8 @@ export default function App() {
   const semanticUpdateRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nameResolverRef = useRef<((value: string | null) => void) | null>(null);
+  const surfaceModeRef = useRef<SurfaceMode>("whiteboard");
+  const fitWhiteboardOnMountRef = useRef(false);
 
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeKey, setActiveKey] = useState("");
@@ -78,9 +134,14 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
   const [nameRequest, setNameRequest] = useState<{ copy: boolean; value: string } | null>(null);
+  const [mobileUse, setMobileUse] = useState(detectsMobileUse);
+  const [surfaceOverride, setSurfaceOverride] = useState<SurfaceMode | null>(readSurfaceOverride);
+  const [simpleSelectedNodeId, setSimpleSelectedNodeId] = useState("root");
+
+  const surfaceMode: SurfaceMode = surfaceOverride ?? (mobileUse ? "simple" : "whiteboard");
+  surfaceModeRef.current = surfaceMode;
 
   tabsRef.current = tabs;
   activeKeyRef.current = activeKey;
@@ -89,8 +150,24 @@ export default function App() {
   const activeTabRef = useRef<EditorTab | null>(null);
   activeTabRef.current = activeTab;
 
+  useEffect(() => {
+    if (!activeTab) return;
+    const selectedExists = activeTab.document.scene.elements.some(
+      (element) => getMindmapNode(element)?.nodeId === simpleSelectedNodeId,
+    );
+    if (!selectedExists) setSimpleSelectedNodeId(activeTab.document.rootNodeId);
+  }, [activeTab, simpleSelectedNodeId]);
+
   const announce = useCallback((message: string, state: "saved" | "error" = "saved") => {
     setStatus({ message, state });
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px), (pointer: coarse)");
+    const sync = () => setMobileUse(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, []);
 
   const refreshSavedDocuments = useCallback(async () => {
@@ -106,7 +183,9 @@ export default function App() {
         const [documents, recovery, library] = await Promise.all([listDocuments(), getRecoveryDocument(), getLibrary()]);
         if (cancelled) return;
         setSavedDocuments(documents);
-        const initialDocument = recovery && validateDocument(recovery).valid ? recovery : documents[0] ?? createBlankDocument();
+        const initialDocument = prepareDocument(
+          recovery && validateDocument(recovery).valid ? recovery : documents[0] ?? createBlankDocument(),
+        );
         const persisted = documents.some((document) => document.id === initialDocument.id);
         const initialTab = { key: createId("tab"), document: initialDocument, persisted };
         setTabs([initialTab]);
@@ -124,7 +203,7 @@ export default function App() {
       } catch (error) {
         if (!cancelled) {
           announce(`Local database failed: ${error instanceof Error ? error.message : String(error)}`, "error");
-          const fallback = { key: createId("tab"), document: createBlankDocument(), persisted: false };
+          const fallback = { key: createId("tab"), document: prepareDocument(createBlankDocument()), persisted: false };
           setTabs([fallback]);
           setActiveKey(fallback.key);
           setReady(true);
@@ -137,9 +216,11 @@ export default function App() {
   }, [announce]);
 
   const captureActiveTab = useCallback((): EditorTab | null => {
-    const api = apiRef.current;
     const tab = activeTabRef.current;
-    if (!api || !tab) return null;
+    if (!tab) return null;
+    if (surfaceModeRef.current === "simple") return tab;
+    const api = apiRef.current;
+    if (!api) return tab;
     return { ...tab, document: currentSceneDocument(tab, api) };
   }, []);
 
@@ -212,7 +293,6 @@ export default function App() {
     (id: CommandId) => {
       const context = commandContext();
       if (!context) return;
-      setContextMenu(null);
       void findCommand(id).execute(context);
     },
     [commandContext],
@@ -264,6 +344,78 @@ export default function App() {
     [announce],
   );
 
+  const chooseSurfaceMode = useCallback((mode: SurfaceMode | null) => {
+    const resolved = mode ?? (detectsMobileUse() ? "simple" : "whiteboard");
+    if (surfaceModeRef.current === "simple" && resolved === "whiteboard") fitWhiteboardOnMountRef.current = true;
+    if (surfaceModeRef.current === "whiteboard") {
+      const captured = captureActiveTab();
+      if (captured) {
+        activeTabRef.current = captured;
+        updateCapturedTab(captured);
+      }
+    }
+    if (mode) localStorage.setItem(SURFACE_MODE_KEY, mode);
+    else localStorage.removeItem(SURFACE_MODE_KEY);
+    setSurfaceOverride(mode);
+    announce(`${mode ? "Switched" : "Automatic view switched"} to ${resolved === "simple" ? "Simple map" : "Whiteboard"}.`);
+  }, [announce, captureActiveTab, updateCapturedTab]);
+
+  const applySimpleElements = useCallback((
+    elements: readonly OrderedExcalidrawElement[],
+    selectedNodeId: string,
+    message: string,
+  ) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const document: DocumentV3 = {
+      ...tab.document,
+      updatedAt: new Date().toISOString(),
+      scene: { ...tab.document.scene, elements },
+    };
+    const validation = validateDocument(document);
+    if (!validation.valid) {
+      announce(validation.errors[0], "error");
+      return;
+    }
+    const nextTab = { ...tab, document };
+    activeTabRef.current = nextTab;
+    lastValidElementsRef.current = elements;
+    setTabs((current) => current.map((item) => item.key === tab.key ? nextTab : item));
+    setSimpleSelectedNodeId(selectedNodeId);
+    scheduleRecovery(document);
+    announce(message);
+  }, [announce, scheduleRecovery]);
+
+  const addSimpleNode = useCallback((nodeId: string, direction: "child" | "sibling") => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const shape = tab.document.scene.elements.find((element) => getMindmapNode(element)?.nodeId === nodeId);
+    if (!shape) return;
+    const result = addConnectedMindmapNode(tab.document.scene.elements, shape.id, direction);
+    if (!result) return;
+    applySimpleElements(result.elements, result.nodeId, direction === "child" ? "Child node added." : "Sibling node added.");
+  }, [applySimpleElements]);
+
+  const addSimpleChild = useCallback((nodeId: string) => addSimpleNode(nodeId, "child"), [addSimpleNode]);
+  const addSimpleSibling = useCallback((nodeId: string) => addSimpleNode(nodeId, "sibling"), [addSimpleNode]);
+
+  const renameSimpleNode = useCallback((nodeId: string, text: string) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    applySimpleElements(renameMindmapNode(tab.document.scene.elements, nodeId, text), nodeId, "Node text updated.");
+  }, [applySimpleElements]);
+
+  const deleteSimpleNode = useCallback((nodeId: string) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const remaining = removeMindmapSubtree(tab.document.scene.elements, nodeId, tab.document.rootNodeId);
+    if (!remaining) {
+      announce("The central node cannot be deleted.", "error");
+      return;
+    }
+    applySimpleElements(remaining, tab.document.rootNodeId, "Branch deleted and remaining nodes rearranged.");
+  }, [announce, applySimpleElements]);
+
   const onSceneChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
       const tab = activeTabRef.current;
@@ -280,7 +432,7 @@ export default function App() {
       const document: DocumentV3 = {
         ...tab.document,
         updatedAt: new Date().toISOString(),
-        scene: { elements: normalised.elements, appState, files },
+        scene: { elements: normalised.elements, appState: cleanPersistedAppState(appState), files },
       };
       const validation = validateDocument(document);
       if (!validation.valid) {
@@ -304,8 +456,9 @@ export default function App() {
 
   const openDocument = useCallback(
     (id: string) => {
-      const document = savedDocuments.find((item) => item.id === id);
-      if (!document) return;
+      const storedDocument = savedDocuments.find((item) => item.id === id);
+      if (!storedDocument) return;
+      const document = prepareDocument(storedDocument);
       const captured = captureActiveTab();
       if (captured) updateCapturedTab(captured);
       const existing = tabsRef.current.find((tab) => tab.document.id === id && tab.persisted);
@@ -324,7 +477,7 @@ export default function App() {
   const newTab = useCallback(() => {
     const captured = captureActiveTab();
     if (captured) updateCapturedTab(captured);
-    const tab = { key: createId("tab"), document: createBlankDocument(`Untitled ${tabsRef.current.length + 1}`), persisted: false };
+    const tab = { key: createId("tab"), document: prepareDocument(createBlankDocument(`Untitled ${tabsRef.current.length + 1}`)), persisted: false };
     setTabs((current) => [...current, tab]);
     setActiveKey(tab.key);
     lastValidElementsRef.current = tab.document.scene.elements;
@@ -333,7 +486,7 @@ export default function App() {
   const newTemplateTab = useCallback((template: "mindmap" | "brainstorm") => {
     const captured = captureActiveTab();
     if (captured) updateCapturedTab(captured);
-    const tab = { key: createId("tab"), document: createTemplateDocument(template), persisted: false };
+    const tab = { key: createId("tab"), document: prepareDocument(createTemplateDocument(template)), persisted: false };
     setTabs((current) => [...current, tab]);
     setActiveKey(tab.key);
     lastValidElementsRef.current = tab.document.scene.elements;
@@ -408,15 +561,11 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell" onContextMenu={(event) => {
-      if (!(event.target instanceof Element) || !event.target.closest(".workspace")) return;
-      event.preventDefault();
-      setContextMenu({ x: event.clientX, y: event.clientY });
-    }}>
+    <main className="app-shell">
       <header className="topbar">
         <div className="brand-block">
           <span className="brand-mark">M</span>
-          <div><strong>Offline Mind Map</strong><small>Excalidraw whiteboard beta</small></div>
+          <div><strong>Offline Mind Map</strong><small>Mind map and whiteboard</small></div>
         </div>
         <div className="toolbar-actions" aria-label="Map actions">
           <button type="button" onClick={newTab}>New tab</button>
@@ -440,6 +589,11 @@ export default function App() {
             if (file) void restoreBackup(file);
           }} />
         </div>
+        <div className="surface-switch" role="group" aria-label="Editor view">
+          <button type="button" aria-pressed={surfaceOverride === null} onClick={() => chooseSurfaceMode(null)}>Auto</button>
+          <button type="button" aria-pressed={surfaceMode === "simple" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("simple")}>Simple</button>
+          <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
+        </div>
         <div className="mode-actions">
           <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>⌘K</kbd></button>
           <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
@@ -461,77 +615,93 @@ export default function App() {
         <span className={`status ${status.state}`} role="status" aria-live="polite">{status.message}</span>
       </nav>
 
-      <section className="workspace">
-        <aside className="mindmap-rail" aria-label="Mind-map tools">
-          <div className="rail-heading"><span>Mind-map mode</span><button type="button" onClick={() => setHelpOpen(true)} aria-label="Shortcut help">?</button></div>
-          <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
-          <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>Enter</kbd></button>
-          <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
-          <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>⌘D</kbd></button>
-          <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
-          <div className="rail-note"><b>Fast mapping</b><p>Use Cmd/Ctrl + arrow to grow in a direction. Plain arrows move selection.</p></div>
-        </aside>
+      {surfaceMode === "whiteboard" ? (
+        <section className="workspace whiteboard-workspace">
+          <aside className="mindmap-rail" aria-label="Mind-map tools">
+            <div className="rail-heading"><span>Mind-map mode</span><button type="button" onClick={() => setHelpOpen(true)} aria-label="Shortcut help">?</button></div>
+            <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
+            <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>⌘↵</kbd></button>
+            <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
+            <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>⌘D</kbd></button>
+            <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
+            <div className="rail-note"><b>Fast mapping</b><p>Double-click to edit text. Cmd/Ctrl + arrow grows a branch; plain arrows move selection.</p></div>
+          </aside>
 
-        <div className="canvas-stage" onClick={() => setContextMenu(null)}>
-          <Excalidraw
-            key={activeTab.key}
-            excalidrawAPI={(api) => {
-              apiRef.current = api;
-              lastValidElementsRef.current = activeTab.document.scene.elements;
-              void getLibrary().then((library) => library && api.updateLibrary({ libraryItems: library as LibraryItems }));
-            }}
-            initialData={{
-              elements: activeTab.document.scene.elements,
-              appState: { ...activeTab.document.scene.appState, name: activeTab.document.name },
-              files: activeTab.document.scene.files,
-              scrollToContent: false,
-            }}
-            onChange={onSceneChange}
-            onLibraryChange={(items) => putLibrary(items)}
-            autoFocus
-            handleKeyboardGlobally
-            gridModeEnabled={Boolean(activeTab.document.scene.appState.gridSize)}
-            objectsSnapModeEnabled
-            aiEnabled={false}
-            UIOptions={{
-              canvasActions: {
-                saveToActiveFile: false,
-                loadScene: false,
-                export: false,
-                saveAsImage: false,
-                toggleTheme: true,
-                clearCanvas: true,
-              },
-              tools: { image: true },
-            }}
-          >
-            <MainMenu>
-              <MainMenu.DefaultItems.ToggleTheme />
-              <MainMenu.DefaultItems.ChangeCanvasBackground />
-              <MainMenu.DefaultItems.ClearCanvas />
-              <MainMenu.Separator />
-              <MainMenu.Item onSelect={() => void saveLocally(false)}>Save locally</MainMenu.Item>
-              <MainMenu.Item onSelect={() => void saveLocally(true)}>Save as copy</MainMenu.Item>
-              <MainMenu.Item onSelect={() => setPaletteOpen(true)}>Command palette</MainMenu.Item>
-              <MainMenu.Item onSelect={() => setHelpOpen(true)}>Shortcut reference</MainMenu.Item>
-              <MainMenu.Separator />
-              <MainMenu.Item onSelect={() => { window.location.href = "./classic/index.html"; }}>Classic recovery editor</MainMenu.Item>
-            </MainMenu>
-            <DefaultSidebar />
-          </Excalidraw>
-        </div>
+          <div className="canvas-stage">
+            <Excalidraw
+              key={activeTab.key}
+              excalidrawAPI={(api) => {
+                apiRef.current = api;
+                lastValidElementsRef.current = activeTab.document.scene.elements;
+                fitWhiteboardOnMountRef.current = false;
+                void getLibrary().then((library) => library && api.updateLibrary({ libraryItems: library as LibraryItems }));
+              }}
+              initialData={{
+                elements: activeTab.document.scene.elements,
+                appState: { ...activeTab.document.scene.appState, name: activeTab.document.name },
+                files: activeTab.document.scene.files,
+                scrollToContent: fitWhiteboardOnMountRef.current,
+              }}
+              onChange={onSceneChange}
+              onLibraryChange={(items) => putLibrary(items)}
+              autoFocus
+              handleKeyboardGlobally
+              gridModeEnabled={Boolean(activeTab.document.scene.appState.gridSize)}
+              objectsSnapModeEnabled
+              aiEnabled={false}
+              UIOptions={{
+                canvasActions: {
+                  saveToActiveFile: false,
+                  loadScene: false,
+                  export: false,
+                  saveAsImage: false,
+                  toggleTheme: true,
+                  clearCanvas: true,
+                },
+                tools: { image: true },
+              }}
+            >
+              <MainMenu>
+                <MainMenu.DefaultItems.ToggleTheme />
+                <MainMenu.DefaultItems.ChangeCanvasBackground />
+                <MainMenu.DefaultItems.ClearCanvas />
+                <MainMenu.Separator />
+                <MainMenu.Item onSelect={() => void saveLocally(false)}>Save locally</MainMenu.Item>
+                <MainMenu.Item onSelect={() => void saveLocally(true)}>Save as copy</MainMenu.Item>
+                <MainMenu.Item onSelect={() => setPaletteOpen(true)}>Command palette</MainMenu.Item>
+                <MainMenu.Item onSelect={() => setHelpOpen(true)}>Shortcut reference</MainMenu.Item>
+                <MainMenu.Separator />
+                <MainMenu.Item onSelect={() => { window.location.href = "./classic/index.html"; }}>Classic recovery editor</MainMenu.Item>
+              </MainMenu>
+              <DefaultSidebar />
+            </Excalidraw>
+          </div>
 
-        <aside className="export-rail" aria-label="Export tools">
-          <div><span className="eyebrow">LOCAL EXPORT</span><h2>Take it with you</h2><p>Images, native files and backups are generated entirely on this device.</p></div>
-          <label>Format<select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
-            <option value="png">PNG image</option><option value="svg">SVG vector</option><option value="pdf">PDF document</option>
-            <option value="excalidraw">Native Excalidraw JSON</option><option value="clipboard">Copy PNG to clipboard</option>
-          </select></label>
-          <button type="button" className="export-button" onClick={() => void runExport()}>Export {exportFormat === "clipboard" ? "to clipboard" : exportFormat.toUpperCase()}</button>
-          <div className="privacy-card"><span>●</span><div><strong>Private by design</strong><p>No cloud, telemetry or CDN requests.</p></div></div>
-          <small>Build {__SOURCE_SHA__.slice(0, 8)}</small>
-        </aside>
-      </section>
+          <aside className="export-rail" aria-label="Export tools">
+            <div><span className="eyebrow">LOCAL EXPORT</span><h2>Take it with you</h2><p>Images, native files and backups are generated entirely on this device.</p></div>
+            <label>Format<select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
+              <option value="png">PNG image</option><option value="svg">SVG vector</option><option value="pdf">PDF document</option>
+              <option value="excalidraw">Native Excalidraw JSON</option><option value="clipboard">Copy PNG to clipboard</option>
+            </select></label>
+            <button type="button" className="export-button" onClick={() => void runExport()}>Export {exportFormat === "clipboard" ? "to clipboard" : exportFormat.toUpperCase()}</button>
+            <div className="privacy-card"><span>●</span><div><strong>Private by design</strong><p>No cloud, telemetry or CDN requests.</p></div></div>
+            <small>Build {__SOURCE_SHA__.slice(0, 8)}</small>
+          </aside>
+        </section>
+      ) : (
+        <section className="workspace simple-workspace">
+          <SimpleMindmap
+            elements={activeTab.document.scene.elements}
+            rootNodeId={activeTab.document.rootNodeId}
+            selectedNodeId={simpleSelectedNodeId}
+            onSelect={setSimpleSelectedNodeId}
+            onRename={renameSimpleNode}
+            onAddChild={addSimpleChild}
+            onAddSibling={addSimpleSibling}
+            onDelete={deleteSimpleNode}
+          />
+        </section>
+      )}
 
       {paletteOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setPaletteOpen(false)}>
         <section className="command-dialog" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
@@ -546,13 +716,6 @@ export default function App() {
           <div>{commandRegistry.filter((command) => command.shortcut).map((command) => <p key={command.id}><span>{command.label}</span><kbd>{command.shortcut}</kbd></p>)}</div>
           <footer>Excalidraw tools: V select · R rectangle · D diamond · O ellipse · A arrow · L line · P freehand · T text · E eraser</footer>
         </section>
-      </div> : null}
-
-      {contextMenu ? <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
-        {(["new-child", "new-sibling", "duplicate-subtree", "delete-subtree", "add-relationship", "command-palette"] as CommandId[]).map((id) => {
-          const command = findCommand(id);
-          return <button type="button" role="menuitem" key={id} onClick={() => executeCommand(id)}><span>{command.label}</span><kbd>{command.shortcut}</kbd></button>;
-        })}
       </div> : null}
 
       {nameRequest ? <div className="modal-backdrop" role="presentation">

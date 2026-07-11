@@ -1,10 +1,15 @@
 # Offline Mind Map App
 
-A fully offline, client-side mind-map and whiteboard application. The `public-beta` build uses Excalidraw core, React, TypeScript and IndexedDB while retaining the original canvas editor as a classic recovery route. It never sends map data to a server.
+A fully offline, client-side mind-map and whiteboard application. The default `public-beta` experience uses React, TypeScript and IndexedDB, with an Excalidraw whiteboard on desktop and an automatically selected touch-friendly Simple map on mobile. The original canvas editor remains available only as a classic recovery route. Map data is never sent to a server.
 
-The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's general whiteboard tools. The classic canvas UI remains available at `classic/index.html` for one recovery deployment.
+The editor combines a keyboard-fast semantic mind-map layer with Excalidraw's general whiteboard tools. Users can switch between **Auto**, **Simple**, and **Whiteboard** at any time; an explicit choice is remembered locally.
 
-## Public beta editor
+## Default editor
+
+- **Responsive editing modes**
+  - Auto mode selects Simple map for a narrow or coarse-pointer mobile device and Whiteboard for desktop use.
+  - Simple map is a native React outline editor rather than a reduced Excalidraw canvas. It keeps hierarchy arrows visible, provides large touch targets, and supports direct label, child, sibling, and branch editing.
+  - Whiteboard preserves Excalidraw's native contextual menu and double-click text editing without a second custom pop-up.
 
 - **Excalidraw whiteboard**
   - Rectangle, ellipse, diamond, text, image, line, arrow, freehand, eraser and frame tools.
@@ -13,9 +18,10 @@ The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's gene
   - Built-in blank mind-map and four-branch brainstorm templates are reusable without a network connection.
 - **Semantic mind maps**
   - Mind-map node and hierarchy metadata live in Excalidraw element `customData`.
-  - Tab/Enter create child and sibling nodes; Cmd/Ctrl+Arrow creates a bound node in a direction.
+  - Tab creates a child; Cmd/Ctrl+Enter creates a sibling without overriding Excalidraw's native Enter text action; Cmd/Ctrl+Arrow creates a bound node in a direction.
   - Plain arrows navigate to the nearest visible mind-map node.
-  - Subtree copy, cut, paste, duplication and deletion share one command registry with the toolbar, context menu and searchable command palette.
+  - Subtree copy, cut, paste, duplication and deletion share one command registry with the toolbar and searchable command palette.
+  - Child and sibling insertion runs a recursive subtree layout. Expanded third-level branches reserve their full height and move neighbouring branches while preserving bound arrows.
   - Hierarchy arrows reject cycles; relationship arrows allow cycles and never change hierarchy.
 - **Local persistence**
   - Named schema-3 documents and binary assets are stored in IndexedDB.
@@ -71,7 +77,7 @@ The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's gene
 
 - **Keyboard shortcuts**
   - **Tab** – create a child node of the currently selected node and focus its editor.
-  - **Enter** – create a sibling node underneath the current node.
+  - **Ctrl/Cmd+Enter** – create a sibling node underneath the current node. Plain **Enter** remains available for Excalidraw text editing.
   - **Delete / Backspace** – delete the selected node (and its descendants), protected so the root cannot be removed.[cite:168]
   - **Ctrl/Cmd+Z** – undo, **Ctrl/Cmd+Shift+Z** – redo.[cite:168]
   - **Ctrl/Cmd+S** – save locally, **Ctrl/Cmd+Shift+S** – save as a new copy.
@@ -124,7 +130,10 @@ The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's gene
   - IndexedDB documents, binary assets, local libraries, recovery snapshots and verified migration.
 
 - **src/commands.ts**
-  - Single transaction-oriented command registry used by mind-map buttons, shortcuts, context menu and command palette.
+  - Single transaction-oriented command registry used by mind-map buttons, shortcuts and the command palette.
+
+- **src/SimpleMindmap.tsx**, **src/mindmap-operations.ts**, **src/tree-layout.mjs**
+  - Touch-first simple editor, shared semantic node operations, editable-label repair, and recursive non-overlapping subtree layout.
 
 - **classic/index.html**, **app.js**, **storage.js**, **hierarchy.js**
   - The original schema-2 canvas editor retained as a recovery route.
@@ -189,7 +198,7 @@ This repository is deployed as a static Vite site with no backend.
 
 Some ideas that could be explored on top of the current foundation:
 
-- More advanced automatic layouts (force-directed, orthogonal tree, mind-map style left/right balancing).
+- Additional automatic layouts (force-directed and balanced left/right mind-map branches).
 - Inline icons / emojis inside nodes.
 - PWA packaging, the 10,000-node benchmark and the complete accessibility audit are tracked in issues #23 and #24.
 

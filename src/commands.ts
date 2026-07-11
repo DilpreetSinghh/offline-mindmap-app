@@ -4,6 +4,12 @@ import {
 import type { AppState, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement, OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { appendBoundConnection, createId, createMindmapElements, getMindmapConnection, getMindmapNode } from "./document";
+import {
+  addConnectedMindmapNode,
+  getMindmapNodeText,
+  reflowMindmapElements,
+  removeMindmapSubtree,
+} from "./mindmap-operations";
 import type { MindmapNodeData } from "./types";
 
 export type CommandId =
@@ -61,8 +67,8 @@ function primaryNode(api: ExcalidrawImperativeAPI): OrderedExcalidrawElement | n
 }
 
 function getNodeText(elements: readonly ExcalidrawElement[], containerId: string): string {
-  const text = elements.find((element) => element.type === "text" && element.containerId === containerId);
-  return text?.type === "text" ? text.text : "Untitled node";
+  const nodeId = getMindmapNode(elements.find((element) => element.id === containerId)!)?.nodeId;
+  return nodeId ? getMindmapNodeText(elements, nodeId) : "Untitled node";
 }
 
 function nextSiblingOrder(elements: readonly ExcalidrawElement[], parentNodeId: string | null): number {
@@ -90,38 +96,12 @@ function addConnectedNode(context: CommandContext, direction: "left" | "right" |
     context.announce("Select a mind-map node first.", "error");
     return;
   }
-  const parent = getMindmapNode(parentElement)!;
   const elements = api.getSceneElements();
-  const isSibling = direction === "sibling" && parent.parentNodeId !== null;
-  const parentNodeId = (isSibling ? parent.parentNodeId : parent.nodeId) ?? parent.nodeId;
-  const connectionParent = isSibling
-    ? elements.find((element) => getMindmapNode(element)?.nodeId === parent.parentNodeId)
-    : parentElement;
-  if (!connectionParent) return;
-
-  const offsets = {
-    left: [-280, 0],
-    right: [280, 0],
-    up: [0, -180],
-    down: [0, 180],
-    child: [280, 0],
-    sibling: [0, 180],
-  } as const;
-  const [dx, dy] = offsets[direction];
-  const nodeId = createId("node");
-  const nodeElements = createMindmapElements(
-    nodeId,
-    "New idea",
-    parentElement.x + dx,
-    parentElement.y + dy,
-    parentNodeId,
-    nextSiblingOrder(elements, parentNodeId),
-  );
-  const shape = nodeElements.find((element) => getMindmapNode(element));
-  if (!shape) return;
-  const nextElements = appendBoundConnection([...elements, ...nodeElements], connectionParent.id, shape.id, parentNodeId, nodeId, "hierarchy");
-  transact(api, nextElements, [shape.id]);
-  api.scrollToContent(shape, { animate: true, fitToContent: false });
+  const result = addConnectedMindmapNode(elements, parentElement.id, direction);
+  if (!result) return;
+  transact(api, result.elements, [result.nodeElementId]);
+  const created = result.elements.find((element) => element.id === result.nodeElementId);
+  if (created) api.scrollToContent(created, { animate: true, fitToContent: false });
 }
 
 function selectNearest(context: CommandContext, direction: "left" | "right" | "up" | "down"): void {
@@ -189,19 +169,16 @@ async function copySubtree(context: CommandContext): Promise<void> {
 
 function removeSubtree(context: CommandContext): void {
   const clipboard = collectSubtree(context.api);
-  if (!clipboard || clipboard.rootNodeId === "root") {
+  const selected = primaryNode(context.api);
+  const selectedNode = selected ? getMindmapNode(selected) : null;
+  if (!clipboard || !selectedNode || selectedNode.parentNodeId === null) {
     context.announce("The root node cannot be cut.", "error");
     return;
   }
-  const nodeIds = new Set(clipboard.nodes.map((node) => node.data.nodeId));
   const elements = context.api.getSceneElements();
-  const shapeIds = new Set(elements.filter((element) => nodeIds.has(getMindmapNode(element)?.nodeId ?? "")).map((element) => element.id));
-  const remaining = elements.filter((element) => {
-    if (shapeIds.has(element.id)) return false;
-    if (element.type === "text" && element.containerId && shapeIds.has(element.containerId)) return false;
-    const connection = getMindmapConnection(element);
-    return !connection || (!nodeIds.has(connection.fromNodeId) && !nodeIds.has(connection.toNodeId));
-  });
+  const rootNodeId = elements.map(getMindmapNode).find((node) => node?.parentNodeId === null)?.nodeId ?? "root";
+  const remaining = removeMindmapSubtree(elements, clipboard.rootNodeId, rootNodeId);
+  if (!remaining) return;
   transact(context.api, remaining, []);
 }
 
@@ -247,7 +224,7 @@ function pasteSubtree(context: CommandContext): void {
     combinedScene = appendBoundConnection(combinedScene, parentElementId, shapeByNodeId.get(nodeId)!, parentNodeId, nodeId, "hierarchy");
   }
   const selected = shapeByNodeId.get(idMap.get(subtreeClipboard.rootNodeId)!)!;
-  transact(context.api, combinedScene, [selected]);
+  transact(context.api, reflowMindmapElements(combinedScene), [selected]);
 }
 
 function addRelationship(context: CommandContext): void {
@@ -266,7 +243,7 @@ function addRelationship(context: CommandContext): void {
 
 export const commandRegistry: readonly Command[] = [
   { id: "new-child", label: "Create child node", shortcut: "Tab", keywords: "child branch", execute: (c) => addConnectedNode(c, "child") },
-  { id: "new-sibling", label: "Create sibling node", shortcut: "Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
+  { id: "new-sibling", label: "Create sibling node", shortcut: "Cmd/Ctrl+Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
   { id: "new-left", label: "Create node to the left", shortcut: "Cmd/Ctrl+←", keywords: "left node", execute: (c) => addConnectedNode(c, "left") },
   { id: "new-right", label: "Create node to the right", shortcut: "Cmd/Ctrl+→", keywords: "right node", execute: (c) => addConnectedNode(c, "right") },
   { id: "new-up", label: "Create node above", shortcut: "Cmd/Ctrl+↑", keywords: "up node", execute: (c) => addConnectedNode(c, "up") },
@@ -304,7 +281,7 @@ export function commandForKeyboardEvent(event: KeyboardEvent, appState: AppState
   if (modifier && key.startsWith("Arrow")) return `new-${key.slice(5).toLowerCase()}` as CommandId;
   if (!modifier && key.startsWith("Arrow")) return `select-${key.slice(5).toLowerCase()}` as CommandId;
   if (!modifier && key === "Tab") return "new-child";
-  if (!modifier && key === "Enter") return "new-sibling";
+  if (modifier && key === "Enter") return "new-sibling";
   if (modifier && key.toLowerCase() === "c") return "copy-subtree";
   if (modifier && key.toLowerCase() === "x") return "cut-subtree";
   if (modifier && key.toLowerCase() === "v") return "paste-subtree";
