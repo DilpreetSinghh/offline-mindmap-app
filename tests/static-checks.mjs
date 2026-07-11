@@ -18,6 +18,12 @@ assert.ok(
 );
 assert.ok(scriptSources.includes("storage.js"), "index.html must load the storage module");
 assert.ok(scriptSources.includes("hierarchy.js"), "index.html must load the hierarchy module");
+assert.ok(scriptSources.includes("shortcuts.js"), "index.html must load the shortcut module");
+
+assert.doesNotMatch(html, /<button(?![^>]*\btype=["']button["'])/gi, "Every button must declare type=button");
+assert.match(html, />Save locally<\/button>/, "The explicit map save action must be labelled Save locally");
+assert.match(html, />Save as copy<\/button>/, "The toolbar must expose Save as copy");
+assert.match(html, /name="source-commit" content="__SOURCE_SHA__"/, "The deploy build must expose its source SHA");
 
 await access(new URL("../vendor/pdf-lib.min.js", import.meta.url));
 await access(new URL("../vendor/pdf-lib.LICENSE.md", import.meta.url));

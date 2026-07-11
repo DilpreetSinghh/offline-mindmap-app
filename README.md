@@ -13,13 +13,14 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
 - **Tabbed workspace**
   - Open multiple maps at once using a tab bar at the top of the canvas.
   - Each tab has its own independent state (nodes, layout, camera position, styles).
-  - Tabs can be renamed via the Save flow (name = map name) and closed individually.
+  - Tabs are named on first explicit save and can be closed individually.
 
 - **Local map storage**
   - Maps are stored under a single key in `localStorage` (`offline-mindmap-maps-v1`).[cite:168]
   - The toolbar offers:
     - **New tab** – start a fresh map in a new tab.
-    - **Save** – prompt for a name and persist the active tab’s state.
+    - **Save locally** – prompt once for a name, then silently update that named map.
+    - **Save as copy** – create a new named map with a separate local ID.
     - **Open in new tab** – load a saved map from the dropdown into its own tab.
   - No map content is ever uploaded anywhere – everything stays in your browser.
 
@@ -50,6 +51,7 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
   - **Enter** – create a sibling node underneath the current node.
   - **Delete / Backspace** – delete the selected node (and its descendants), protected so the root cannot be removed.[cite:168]
   - **Ctrl/Cmd+Z** – undo, **Ctrl/Cmd+Shift+Z** – redo.[cite:168]
+  - **Ctrl/Cmd+S** – save locally, **Ctrl/Cmd+Shift+S** – save as a new copy.
   - **Esc** – clear the current selection.
   - **Shift+Alt+← / →** – outdent or indent the selected node.
   - **Shift+Alt+↑ / ↓** – move the selected node before or after its sibling.
@@ -105,6 +107,9 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
 - **storage.js**
   - Defines the versioned backup schema, validation rules, and migrations used by autosave and JSON restore.
 
+- **shortcuts.js**
+  - Defines platform-neutral shortcut intent detection, including local save and save-as-copy.
+
 - **styles.css**
   - Dark, glassy UI with soft gradients and rounded panels.
   - Responsive three-column layout on desktop (Settings → Canvas → Export), collapsing to stacked panels on smaller screens.
@@ -134,10 +139,9 @@ All maps stay inside your browser storage. There is no telemetry, analytics, or 
 This repository is designed to be deployed as a static site (no backend). Common options:
 
 - **GitHub Pages**
-  - In GitHub, go to **Settings → Pages** for this repository.
-  - Under **Build and deployment → Source**, choose **Deploy from a branch**.
-  - Select the `main` branch and the root (`/`) folder.
-  - Save; GitHub will build and serve the site at a URL like `https://<user>.github.io/offline-mindmap-app/`.[cite:170]
+  - In GitHub, go to **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**.
+  - Pushes to `public-beta` run `.github/workflows/deploy-pages.yml` and publish that exact branch.
+  - The deployed `index.html` includes a `source-commit` meta tag containing the source commit SHA for smoke-test verification.
 
 - **Other static hosts** (Netlify, Vercel, Cloudflare Pages, etc.)
   - Connect this repo and configure it as a static site with `index.html` as the entry point.

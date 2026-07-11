@@ -8,6 +8,7 @@
   const newMapBtn = document.getElementById("newMapBtn");
   const openMapBtn = document.getElementById("openMapBtn");
   const saveMapBtn = document.getElementById("saveMapBtn");
+  const saveCopyBtn = document.getElementById("saveCopyBtn");
   const backupJsonBtn = document.getElementById("backupJsonBtn");
   const restoreJsonBtn = document.getElementById("restoreJsonBtn");
   const restoreJsonInput = document.getElementById("restoreJsonInput");
@@ -66,6 +67,7 @@
     outdentNode: outdentHierarchyNode,
     reparentNode: reparentHierarchyNode,
   } = window.MindMapHierarchy;
+  const { getLocalSaveIntent } = window.MindMapShortcuts;
 
   // Tabs: each tab keeps its own state object and optional storage id
   let tabs = [];
@@ -158,6 +160,10 @@
     storageStatus.dataset.state = statusState || "";
   }
 
+  function formatSaveTime(date) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
   async function updateStorageEstimate(prefix) {
     if (!navigator.storage || !navigator.storage.estimate) {
       if (prefix) setStorageStatus(prefix, "saved");
@@ -167,7 +173,7 @@
       const estimate = await navigator.storage.estimate();
       const usage = formatBytes(estimate.usage || 0);
       const quota = formatBytes(estimate.quota || 0);
-      setStorageStatus(`${prefix || "Saved locally"} · ${usage} of ${quota}`, "saved");
+      storageStatus.title = `${usage} of ${quota} browser storage used`;
     } catch (_error) {
       if (prefix) setStorageStatus(prefix, "saved");
     }
@@ -1717,34 +1723,56 @@
     });
   }
 
-  function saveCurrentMap() {
-    const tab = getActiveTab();
-    if (!tab) return;
-    const maps = loadMapsFromStorage();
-    let name = tab.name || "My mind map";
-    name = prompt("Save map as (name):", name) || name;
-    tab.name = name;
+  function createMapId() {
+    if (globalThis.crypto?.randomUUID) return `map-${globalThis.crypto.randomUUID()}`;
+    return `map-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
 
-    if (tab.id) {
-      const existing = maps.find((m) => m.id === tab.id);
+  function saveCurrentMap(options) {
+    closeInlineEditor(true);
+    const tab = getActiveTab();
+    if (!tab) return false;
+    const saveAsCopy = options?.saveAsCopy === true;
+    const previousIdentity = { id: tab.id, name: tab.name };
+    const maps = JSON.parse(JSON.stringify(loadMapsFromStorage()));
+    const needsName = saveAsCopy || !tab.id;
+    let name = tab.name || "My mind map";
+    if (needsName) {
+      const requestedName = prompt(saveAsCopy ? "Save copy as (name):" : "Save map as (name):", name);
+      if (requestedName === null) {
+        setStorageStatus("Local save cancelled", "");
+        return false;
+      }
+      name = requestedName.trim() || name;
+    }
+
+    const id = saveAsCopy || !tab.id ? createMapId() : tab.id;
+    if (!saveAsCopy && tab.id) {
+      const existing = maps.find((m) => m.id === id);
       if (existing) {
         existing.name = name;
         existing.data = state;
       } else {
-        maps.push({ id: tab.id, name, data: state });
+        maps.push({ id, name, data: state });
       }
     } else {
-      const id = "map-" + Date.now();
-      tab.id = id;
       maps.push({ id, name, data: state });
     }
-    if (!saveMapsToStorage(maps)) return;
+
+    if (!saveMapsToStorage(maps)) {
+      tab.id = previousIdentity.id;
+      tab.name = previousIdentity.name;
+      return false;
+    }
+    tab.id = id;
+    tab.name = name;
     refreshMapSelect();
     refreshTabBar();
-    if (tab.id) {
-      mapSelect.value = tab.id;
-    }
+    mapSelect.value = id;
     flushAutosave();
+    setStorageStatus(`Saved locally · ${formatSaveTime(new Date())}`, "saved");
+    void updateStorageEstimate();
+    return true;
   }
 
   function openSelectedMap() {
@@ -1952,6 +1980,14 @@
   exportBtn.addEventListener("click", exportMap);
 
   document.addEventListener("keydown", (e) => {
+    const saveIntent = getLocalSaveIntent(e);
+    if (saveIntent) {
+      e.preventDefault();
+      e.stopPropagation();
+      saveCurrentMap({ saveAsCopy: saveIntent === "copy" });
+      return;
+    }
+
     if (inlineEditor) return;
 
     const target = e.target;
@@ -2002,6 +2038,7 @@
 
   newMapBtn.addEventListener("click", newMap);
   saveMapBtn.addEventListener("click", saveCurrentMap);
+  saveCopyBtn.addEventListener("click", () => saveCurrentMap({ saveAsCopy: true }));
   backupJsonBtn.addEventListener("click", exportJsonBackup);
   restoreJsonBtn.addEventListener("click", () => restoreJsonInput.click());
   restoreJsonInput.addEventListener("change", () => {

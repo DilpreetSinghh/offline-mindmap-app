@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="source-commit" content="__SOURCE_SHA__" />
   <title>Offline Mind Map</title>
   <link rel="stylesheet" href="styles.css" />
   <!-- Vendored so PDF export remains available without a network connection. -->
@@ -12,21 +13,22 @@
   <div id="app">
     <header class="toolbar">
       <div class="toolbar-left">
-        <button id="newMapBtn">New tab</button>
+        <button id="newMapBtn" type="button">New tab</button>
         <select id="mapSelect"></select>
-        <button id="openMapBtn">Open in new tab</button>
-        <button id="saveMapBtn">Save</button>
-        <button id="backupJsonBtn">Backup JSON</button>
-        <button id="restoreJsonBtn">Restore JSON</button>
+        <button id="openMapBtn" type="button">Open in new tab</button>
+        <button id="saveMapBtn" type="button">Save locally</button>
+        <button id="saveCopyBtn" type="button">Save as copy</button>
+        <button id="backupJsonBtn" type="button">Backup JSON</button>
+        <button id="restoreJsonBtn" type="button">Restore JSON</button>
         <input id="restoreJsonInput" type="file" accept="application/json,.json" hidden />
-        <button id="undoBtn">Undo</button>
-        <button id="redoBtn">Redo</button>
+        <button id="undoBtn" type="button">Undo</button>
+        <button id="redoBtn" type="button">Redo</button>
         <span id="storageStatus" class="storage-status" role="status" aria-live="polite">Local recovery ready</span>
       </div>
       <div class="toolbar-right">
-        <button id="addNodeBtn">Add node</button>
-        <button id="deleteNodeBtn">Delete node</button>
-        <button id="autoFitBtn">Auto-fit</button>
+        <button id="addNodeBtn" type="button">Add node</button>
+        <button id="deleteNodeBtn" type="button">Delete node</button>
+        <button id="autoFitBtn" type="button">Auto-fit</button>
       </div>
     </header>
 
@@ -64,7 +66,7 @@
               <option value="dashed">Dashed</option>
             </select>
           </label>
-          <button id="applyNodeStyleToAllBtn" class="secondary small" style="display:none; margin-top:0.75rem;">Apply style to all nodes</button>
+          <button id="applyNodeStyleToAllBtn" type="button" class="secondary small" style="display:none; margin-top:0.75rem;">Apply style to all nodes</button>
         </div>
 
         <div class="panel-section">
@@ -100,7 +102,7 @@
             </div>
           </div>
 
-          <button id="applyLayoutBtn">Apply layout</button>
+          <button id="applyLayoutBtn" type="button">Apply layout</button>
         </div>
       </section>
 
@@ -158,7 +160,7 @@
           </div>
         </div>
         <div class="panel-section">
-          <button id="exportBtn" class="primary">Download</button>
+          <button id="exportBtn" type="button" class="primary">Download</button>
           <p class="small-note">
             All exports are generated in your browser. Your maps never leave this device.
           </p>
@@ -169,6 +171,7 @@
 
   <script src="storage.js"></script>
   <script src="hierarchy.js"></script>
+  <script src="shortcuts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
