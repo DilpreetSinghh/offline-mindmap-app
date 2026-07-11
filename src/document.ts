@@ -14,6 +14,7 @@ import {
   type MindmapNodeData,
 } from "./types";
 import { validateHierarchyIndex } from "./hierarchy-index.mjs";
+export { normaliseRootlessWhiteboard } from "./rootless-whiteboard.mjs";
 
 export function createId(prefix: string): string {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -309,6 +310,7 @@ export function validateDocument(document: DocumentV3): DocumentValidation {
   const nodes = new Map<string, MindmapNodeData>();
   const elementIds = new Set<string>();
   for (const element of document?.scene?.elements ?? []) {
+    if (element.isDeleted) continue;
     if (elementIds.has(element.id)) errors.push(`Duplicate element ID: ${element.id}`);
     elementIds.add(element.id);
     const node = getMindmapNode(element);
@@ -317,10 +319,11 @@ export function validateDocument(document: DocumentV3): DocumentValidation {
     else nodes.set(node.nodeId, node);
     if (!Number.isFinite(node.siblingOrder)) errors.push(`Invalid sibling order: ${node.nodeId}`);
   }
-  errors.push(...validateHierarchyIndex([...nodes.values()], document?.rootNodeId).errors);
+  if (nodes.size) errors.push(...validateHierarchyIndex([...nodes.values()], document?.rootNodeId).errors);
 
   const hierarchyParents = new Map<string, number>();
   for (const element of document?.scene?.elements ?? []) {
+    if (element.isDeleted) continue;
     const connection = getMindmapConnection(element);
     if (!connection) continue;
     if (!nodes.has(connection.fromNodeId) || !nodes.has(connection.toNodeId)) {

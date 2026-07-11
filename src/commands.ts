@@ -36,6 +36,7 @@ export type CommandId =
 
 export type CommandContext = {
   api: ExcalidrawImperativeAPI;
+  rootNodeId: string;
   openPalette: () => void;
   openHelp: () => void;
   announce: (message: string, state?: "saved" | "error") => void;
@@ -68,6 +69,15 @@ function primaryNode(api: ExcalidrawImperativeAPI): OrderedExcalidrawElement | n
   return selectedNodeElements(api)[0] ?? null;
 }
 
+function selectedRootCandidate(api: ExcalidrawImperativeAPI): OrderedExcalidrawElement | null {
+  if (api.getSceneElements().some((element) => getMindmapNode(element))) return null;
+  const selected = api.getAppState().selectedElementIds;
+  return api.getSceneElements().find((element) => (
+    selected[element.id]
+    && (element.type === "rectangle" || element.type === "ellipse" || element.type === "diamond")
+  )) ?? null;
+}
+
 function getNodeText(elements: readonly ExcalidrawElement[], containerId: string): string {
   const nodeId = getMindmapNode(elements.find((element) => element.id === containerId)!)?.nodeId;
   return nodeId ? getMindmapNodeText(elements, nodeId) : "Untitled node";
@@ -93,17 +103,38 @@ function transact(api: ExcalidrawImperativeAPI, elements: readonly OrderedExcali
 
 function addConnectedNode(context: CommandContext, direction: "left" | "right" | "up" | "down" | "child" | "sibling"): void {
   const { api } = context;
-  const parentElement = primaryNode(api);
+  let elements = api.getSceneElements();
+  let parentElement = primaryNode(api);
+  let promotedRoot = false;
   if (!parentElement) {
-    context.announce("Select a mind-map node first.", "error");
+    const candidate = selectedRootCandidate(api);
+    if (candidate) {
+      elements = elements.map((element) => element.id === candidate.id ? {
+        ...element,
+        customData: {
+          ...element.customData,
+          mindmapNode: {
+            nodeId: context.rootNodeId,
+            parentNodeId: null,
+            siblingOrder: 0,
+            collapsed: false,
+          },
+        },
+      } as OrderedExcalidrawElement : element);
+      parentElement = elements.find((element) => element.id === candidate.id) ?? null;
+      promotedRoot = Boolean(parentElement);
+    }
+  }
+  if (!parentElement) {
+    context.announce("Select a mind-map node or a shape to use as the new root.", "error");
     return;
   }
-  const elements = api.getSceneElements();
   const result = addConnectedMindmapNode(elements, parentElement.id, direction);
   if (!result) return;
   transact(api, result.elements, [result.nodeElementId]);
   const created = result.elements.find((element) => element.id === result.nodeElementId);
   if (created) api.scrollToContent(created, { animate: true, fitToContent: false });
+  if (promotedRoot) context.announce("Selected shape is now the root mind-map node.");
 }
 
 function selectNearest(context: CommandContext, direction: "left" | "right" | "up" | "down"): void {

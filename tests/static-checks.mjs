@@ -55,6 +55,9 @@ assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hie
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
+assert.match(betaDocument, /if \(nodes\.size\)/, "Whiteboard-only documents must validate without a mind-map root");
+assert.match(betaApp, /normaliseRootlessWhiteboard\(api\.getSceneElements\(\), tab\.document\.rootNodeId\)/, "Local save must normalise a deleted-root scene before validation");
+assert.match(betaCommands, /Selected shape is now the root mind-map node/, "A selected whiteboard shape must be promotable to a replacement root");
 assert.match(betaDatabase, /indexedDB\.open/, "Schema-3 documents must use IndexedDB");
 assert.match(betaDatabase, /compareMigration/, "Migration must perform read-back hierarchy verification");
 

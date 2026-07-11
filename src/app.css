@@ -92,6 +92,9 @@ kbd { border: 1px solid #d8d1c6; border-bottom-width: 2px; border-radius: 5px; p
 .simple-map-header h1 { margin: 4px 0 0; font-family: Georgia, serif; font-size: 25px; }
 .simple-map-header p { max-width: 360px; margin: 0; color: #766e64; font-size: 11px; line-height: 1.45; text-align: right; }
 .simple-map-list { min-height: 0; overflow: auto; padding: 15px 18px 32px; overscroll-behavior: contain; }
+.simple-map-empty { min-height: 100%; display: grid; place-content: center; gap: 7px; padding: 24px; color: #756c61; text-align: center; }
+.simple-map-empty strong { color: #332d26; font-family: Georgia, serif; font-size: 19px; }
+.simple-map-empty span { max-width: 440px; font-size: 11px; line-height: 1.5; }
 .simple-node-row { --node-depth: 0; min-height: 84px; display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 6px; margin-left: calc(var(--node-depth) * 24px); content-visibility: auto; contain-intrinsic-size: auto 84px; }
 .simple-arrow { width: 34px; height: 34px; overflow: visible; fill: none; stroke: #9a712f; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .simple-root-dot { display: grid; place-items: center; width: 34px; height: 34px; color: #b06d22; font-size: 12px; }

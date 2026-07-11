@@ -16,6 +16,7 @@ import {
   createTemplateDocument,
   getMindmapNode,
   normaliseConnectionBindings,
+  normaliseRootlessWhiteboard,
   validateDocument,
 } from "./document";
 import {
@@ -82,11 +83,12 @@ function cleanPersistedAppState(appState: Partial<AppState>): Partial<AppState> 
 }
 
 function prepareDocument(document: DocumentV3): DocumentV3 {
+  const rootless = normaliseRootlessWhiteboard(document.scene.elements, document.rootNodeId);
   return {
     ...document,
     scene: {
       ...document.scene,
-      elements: ensureEditableMindmapElements(document.scene.elements),
+      elements: ensureEditableMindmapElements(rootless.elements),
       appState: cleanPersistedAppState(document.scene.appState),
     },
   };
@@ -98,15 +100,22 @@ function formatTime(date = new Date()): string {
 
 function isMindmapSelection(api: ExcalidrawImperativeAPI): boolean {
   const selected = api.getAppState().selectedElementIds;
-  return api.getSceneElements().some((element) => selected[element.id] && getMindmapNode(element));
+  const elements = api.getSceneElements();
+  if (elements.some((element) => selected[element.id] && getMindmapNode(element))) return true;
+  const hasMindmap = elements.some((element) => getMindmapNode(element));
+  return !hasMindmap && elements.some((element) => (
+    selected[element.id]
+    && (element.type === "rectangle" || element.type === "ellipse" || element.type === "diamond")
+  ));
 }
 
 function currentSceneDocument(tab: EditorTab, api: ExcalidrawImperativeAPI): DocumentV3 {
+  const rootless = normaliseRootlessWhiteboard(api.getSceneElements(), tab.document.rootNodeId);
   return {
     ...tab.document,
     updatedAt: new Date().toISOString(),
     scene: {
-      elements: api.getSceneElements(),
+      elements: rootless.elements,
       appState: cleanPersistedAppState(api.getAppState()),
       files: api.getFiles(),
     },
@@ -284,6 +293,7 @@ export default function App() {
     if (!apiRef.current) return null;
     return {
       api: apiRef.current,
+      rootNodeId: activeTabRef.current?.document.rootNodeId ?? "root",
       openPalette: () => setPaletteOpen(true),
       openHelp: () => setHelpOpen(true),
       announce,
@@ -422,7 +432,8 @@ export default function App() {
       const tab = activeTabRef.current;
       const api = apiRef.current;
       if (!tab || !api || semanticUpdateRef.current) return;
-      const normalised = normaliseConnectionBindings(elements);
+      const rootless = normaliseRootlessWhiteboard(elements, tab.document.rootNodeId);
+      const normalised = normaliseConnectionBindings(rootless.elements);
       if (normalised.errors.length) {
         semanticUpdateRef.current = true;
         api.updateScene({ elements: lastValidElementsRef.current, captureUpdate: CaptureUpdateAction.NEVER });
@@ -444,7 +455,7 @@ export default function App() {
         return;
       }
       lastValidElementsRef.current = normalised.elements;
-      if (normalised.changed) {
+      if (rootless.changed || normalised.changed) {
         semanticUpdateRef.current = true;
         api.updateScene({ elements: normalised.elements, captureUpdate: CaptureUpdateAction.NEVER });
         semanticUpdateRef.current = false;

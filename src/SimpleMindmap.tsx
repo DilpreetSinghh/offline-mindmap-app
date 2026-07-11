@@ -167,6 +167,12 @@ export default function SimpleMindmap({
         <p>Tap any label to edit it. Arrows show the parent-to-child direction.</p>
       </header>
       <div className="simple-map-list">
+        {!rows.length ? (
+          <div className="simple-map-empty" role="status">
+            <strong>This canvas is a whiteboard.</strong>
+            <span>Switch to Whiteboard to edit its drawings, or create a mind map from a selected shape there.</span>
+          </div>
+        ) : null}
         {rows.map((node) => (
           <SimpleNodeRow
             key={node.nodeId}
