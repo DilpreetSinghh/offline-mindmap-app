@@ -10,6 +10,7 @@ The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's gene
   - Rectangle, ellipse, diamond, text, image, line, arrow, freehand, eraser and frame tools.
   - Marquee and multi-selection, resize, rotate, align, distribute, groups, layers, locking, snapping, grid and zoom.
   - Local libraries and image files are persisted in IndexedDB; production fonts and editor assets are bundled locally.
+  - Built-in blank mind-map and four-branch brainstorm templates are reusable without a network connection.
 - **Semantic mind maps**
   - Mind-map node and hierarchy metadata live in Excalidraw element `customData`.
   - Tab/Enter create child and sibling nodes; Cmd/Ctrl+Arrow creates a bound node in a direction.

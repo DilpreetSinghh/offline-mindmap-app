@@ -119,6 +119,26 @@ export function createBlankDocument(name = "Untitled map"): DocumentV3 {
   };
 }
 
+export function createTemplateDocument(template: "mindmap" | "brainstorm"): DocumentV3 {
+  const document = createBlankDocument(template === "brainstorm" ? "Brainstorm" : "Untitled map");
+  if (template === "mindmap") return document;
+  const root = document.scene.elements.find((element) => getMindmapNode(element)?.nodeId === "root")!;
+  const branches = [
+    { text: "Opportunity", x: 570, y: 110 },
+    { text: "Evidence", x: 570, y: 240 },
+    { text: "Risk", x: 570, y: 370 },
+    { text: "Next step", x: 280, y: 390 },
+  ];
+  let elements = [...document.scene.elements];
+  branches.forEach((branch, index) => {
+    const nodeId = createId("node");
+    const created = createMindmapElements(nodeId, branch.text, branch.x, branch.y, "root", index);
+    const shape = created.find((element) => getMindmapNode(element))!;
+    elements = appendBoundConnection([...elements, ...created], root.id, shape.id, "root", nodeId, "hierarchy");
+  });
+  return { ...document, scene: { ...document.scene, elements } };
+}
+
 export function migrateLegacyState(id: string, name: string, state: LegacyState): DocumentV3 {
   const nodes = state.nodes ?? [];
   const nodeSkeletons: ExcalidrawElementSkeleton[] = nodes.map((node, index) => ({

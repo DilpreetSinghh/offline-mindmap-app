@@ -13,6 +13,7 @@ import {
   assertValidDocument,
   createBlankDocument,
   createId,
+  createTemplateDocument,
   getMindmapNode,
   normaliseConnectionBindings,
   validateDocument,
@@ -329,6 +330,15 @@ export default function App() {
     lastValidElementsRef.current = tab.document.scene.elements;
   }, [captureActiveTab, updateCapturedTab]);
 
+  const newTemplateTab = useCallback((template: "mindmap" | "brainstorm") => {
+    const captured = captureActiveTab();
+    if (captured) updateCapturedTab(captured);
+    const tab = { key: createId("tab"), document: createTemplateDocument(template), persisted: false };
+    setTabs((current) => [...current, tab]);
+    setActiveKey(tab.key);
+    lastValidElementsRef.current = tab.document.scene.elements;
+  }, [captureActiveTab, updateCapturedTab]);
+
   const closeTab = useCallback(
     (key: string) => {
       setTabs((current) => {
@@ -410,6 +420,13 @@ export default function App() {
         </div>
         <div className="toolbar-actions" aria-label="Map actions">
           <button type="button" onClick={newTab}>New tab</button>
+          <select aria-label="New from template" value="" onChange={(event) => {
+            if (event.target.value) newTemplateTab(event.target.value as "mindmap" | "brainstorm");
+          }}>
+            <option value="">Templates…</option>
+            <option value="mindmap">Blank mind map</option>
+            <option value="brainstorm">Four-branch brainstorm</option>
+          </select>
           <select aria-label="Saved local maps" value="" onChange={(event) => openDocument(event.target.value)}>
             <option value="">Open local map…</option>
             {savedDocuments.map((document) => <option key={document.id} value={document.id}>{document.name}</option>)}
