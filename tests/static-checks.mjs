@@ -56,12 +56,16 @@ assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "Document
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
 assert.match(betaDocument, /if \(nodes\.size\)/, "Whiteboard-only documents must validate without a mind-map root");
-assert.match(betaApp, /normaliseRootlessWhiteboard\(api\.getSceneElements\(\), tab\.document\.rootNodeId\)/, "Local save must normalise a deleted-root scene before validation");
+assert.match(betaApp, /mergeFoldedScene\(tab\.document\.scene\.elements, api\.getSceneElements\(\)\)[\s\S]*normaliseRootlessWhiteboard\(merged, tab\.document\.rootNodeId\)/, "Local save must merge folded content and normalise a deleted-root scene before validation");
 assert.match(betaCommands, /Selected shape is now the root mind-map node/, "A selected whiteboard shape must be promotable to a replacement root");
 assert.match(betaCommands, /offline-mindmap-subtree/, "Subtree clipboard data must use an explicit versioned format");
 assert.match(betaCommands, /appendStyledConnection/, "Subtree paste must restore internal styled connections");
 assert.match(betaCommands, /removeMindmapSubtrees/, "Bulk deletion must remove selected branches in one transaction");
 assert.match(betaApp, /addEventListener\("paste"/, "External Markdown and plain-text lists must be handled from the paste event");
+assert.match(betaDocument, /projectFoldedElements/, "Collapsed descendants must be projected out of the Excalidraw scene");
+assert.match(betaApp, /mergeFoldedScene/, "Visible Excalidraw edits must merge back into the full canonical document");
+assert.match(betaCommands, /Collapse all branches/, "The command layer must expose level and all-branch folding");
+assert.match(simpleMindmap, /Expand \+/, "Simple mode must show hidden descendant counts on collapsed nodes");
 assert.match(betaDatabase, /indexedDB\.open/, "Schema-3 documents must use IndexedDB");
 assert.match(betaDatabase, /compareMigration/, "Migration must perform read-back hierarchy verification");
 

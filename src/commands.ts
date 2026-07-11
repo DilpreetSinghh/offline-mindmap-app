@@ -3,7 +3,14 @@ import {
 } from "@excalidraw/excalidraw";
 import type { AppState, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement, OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import { appendBoundConnection, createId, createMindmapElements, getMindmapConnection, getMindmapNode } from "./document";
+import {
+  appendBoundConnection,
+  createId,
+  createMindmapElements,
+  getMindmapConnection,
+  getMindmapNode,
+  projectFoldedElements,
+} from "./document";
 import {
   addConnectedMindmapNode,
   getMindmapNodeText,
@@ -14,6 +21,8 @@ import {
 import type { MindmapConnectionData, MindmapNodeData } from "./types";
 import { routeMindmapShortcut } from "./shortcut-routing.mjs";
 import { isOutlinePaste, parseIndentedOutline } from "./outline-format.mjs";
+import { foldingIndex, nodeDepths, setNodesCollapsed } from "./folding.mjs";
+import { expandSelectedBranches } from "./subtree-selection.mjs";
 
 export { formatShortcutLabel } from "./shortcut-routing.mjs";
 
@@ -33,6 +42,12 @@ export type CommandId =
   | "paste-subtree"
   | "duplicate-subtree"
   | "delete-subtree"
+  | "toggle-fold"
+  | "toggle-sibling-folds"
+  | "fold-one-level"
+  | "unfold-one-level"
+  | "fold-all"
+  | "unfold-all"
   | "reflow-map"
   | "add-relationship"
   | "command-palette"
@@ -41,6 +56,8 @@ export type CommandId =
 export type CommandContext = {
   api: ExcalidrawImperativeAPI;
   rootNodeId: string;
+  getCanonicalElements: () => readonly OrderedExcalidrawElement[];
+  stageCanonicalElements: (elements: readonly OrderedExcalidrawElement[]) => void;
   openPalette: () => void;
   openHelp: () => void;
   announce: (message: string, state?: "saved" | "error") => void;
@@ -177,10 +194,10 @@ function selectNearest(context: CommandContext, direction: "left" | "right" | "u
   api.scrollToContent(nearest, { animate: true, fitToContent: false });
 }
 
-function collectSubtree(api: ExcalidrawImperativeAPI): SubtreeClipboard | null {
-  const root = primaryNode(api);
+function collectSubtree(context: CommandContext): SubtreeClipboard | null {
+  const root = primaryNode(context.api);
   if (!root) return null;
-  const elements = api.getSceneElements();
+  const elements = context.getCanonicalElements();
   const rootData = getMindmapNode(root)!;
   const wanted = new Set([rootData.nodeId]);
   let changed = true;
@@ -216,7 +233,7 @@ function collectSubtree(api: ExcalidrawImperativeAPI): SubtreeClipboard | null {
 }
 
 async function copySubtree(context: CommandContext): Promise<void> {
-  subtreeClipboard = collectSubtree(context.api);
+  subtreeClipboard = collectSubtree(context);
   if (!subtreeClipboard) return;
   try {
     await navigator.clipboard.writeText(`offline-mindmap-subtree:${JSON.stringify(subtreeClipboard)}`);
@@ -232,10 +249,20 @@ function removeNodeIds(context: CommandContext, nodeIds: readonly string[]): voi
     context.announce("The root node cannot be deleted.", "error");
     return;
   }
-  const elements = context.api.getSceneElements();
+  const elements = context.getCanonicalElements();
+  const records = elements.flatMap((element) => {
+    const node = getMindmapNode(element);
+    return node ? [{ nodeId: node.nodeId, parentNodeId: node.parentNodeId }] : [];
+  });
+  const expanded = expandSelectedBranches(records, nodeIds, context.rootNodeId);
+  const hidden = foldingIndex(elements).hiddenNodeIds as Set<string>;
+  if (expanded.nodeIds.some((nodeId) => hidden.has(nodeId))) {
+    context.announce("Expand folded branches before deleting them so Undo can restore every node.", "error");
+    return;
+  }
   const remaining = removeMindmapSubtrees(elements, nodeIds, context.rootNodeId);
   if (!remaining) return;
-  transact(context.api, remaining, []);
+  transact(context.api, projectFoldedElements(remaining), []);
 }
 
 function removeSelectedSubtrees(context: CommandContext): void {
@@ -322,6 +349,7 @@ function pasteSubtree(
       nodeId,
       parentNodeId,
       siblingOrder: isRoot ? nextSiblingOrder(elements, targetData.nodeId) : source.data.siblingOrder,
+      collapsed: false,
     };
     const shape = {
       ...structuredClone(source.shape),
@@ -432,6 +460,88 @@ function pasteOutline(context: CommandContext, text: string): void {
   context.announce(`Pasted ${records.length} outline node${records.length === 1 ? "" : "s"}.`);
 }
 
+function applyFoldState(
+  context: CommandContext,
+  nodeIds: readonly string[],
+  collapsed: boolean,
+  message: string,
+): void {
+  const canonical = context.getCanonicalElements();
+  const next = setNodesCollapsed(canonical, nodeIds, collapsed) as OrderedExcalidrawElement[];
+  context.stageCanonicalElements(next);
+  transact(context.api, projectFoldedElements(next), selectedNodeElements(context.api).map((element) => element.id));
+  context.announce(message);
+}
+
+function toggleSelectedFold(context: CommandContext): void {
+  const selected = primaryNode(context.api);
+  const selectedData = selected && getMindmapNode(selected);
+  if (!selectedData) return;
+  const canonical = context.getCanonicalElements();
+  const index = foldingIndex(canonical);
+  if (!(index.children.get(selectedData.nodeId)?.length)) {
+    context.announce("This node has no descendants to fold.", "error");
+    return;
+  }
+  const current = index.nodes.get(selectedData.nodeId);
+  const collapse = !current?.collapsed;
+  applyFoldState(context, [selectedData.nodeId], collapse, collapse ? "Branch collapsed." : "Branch expanded.");
+}
+
+function toggleSiblingFolds(context: CommandContext): void {
+  const selected = primaryNode(context.api);
+  const selectedData = selected && getMindmapNode(selected);
+  if (!selectedData) return;
+  const canonical = context.getCanonicalElements();
+  const index = foldingIndex(canonical);
+  const siblingIds = ((index.children.get(selectedData.parentNodeId) ?? []) as string[])
+    .filter((nodeId) => (index.children.get(nodeId)?.length ?? 0) > 0);
+  if (!siblingIds.length) {
+    context.announce("No sibling branches have descendants to fold.", "error");
+    return;
+  }
+  const collapse = siblingIds.some((nodeId) => !index.nodes.get(nodeId)?.collapsed);
+  applyFoldState(context, siblingIds, collapse, collapse ? "Sibling branches collapsed." : "Sibling branches expanded.");
+}
+
+function foldOneVisibleLevel(context: CommandContext): void {
+  const canonical = context.getCanonicalElements();
+  const index = foldingIndex(canonical);
+  const depths = nodeDepths(canonical);
+  const candidates = [...index.nodes.keys()].filter((nodeId) => (
+    !index.hiddenNodeIds.has(nodeId)
+    && !index.nodes.get(nodeId)?.collapsed
+    && (index.children.get(nodeId)?.length ?? 0) > 0
+  ));
+  if (!candidates.length) return;
+  const deepest = Math.max(...candidates.map((nodeId) => depths.get(nodeId) ?? 0));
+  applyFoldState(context, candidates.filter((nodeId) => depths.get(nodeId) === deepest), true, "Collapsed one visible level.");
+}
+
+function unfoldOneLevel(context: CommandContext): void {
+  const canonical = context.getCanonicalElements();
+  const index = foldingIndex(canonical);
+  const depths = nodeDepths(canonical);
+  const candidates = [...index.nodes.keys()].filter((nodeId) => (
+    !index.hiddenNodeIds.has(nodeId) && index.nodes.get(nodeId)?.collapsed
+  ));
+  if (!candidates.length) return;
+  const shallowest = Math.min(...candidates.map((nodeId) => depths.get(nodeId) ?? 0));
+  applyFoldState(context, candidates.filter((nodeId) => depths.get(nodeId) === shallowest), false, "Expanded one level.");
+}
+
+function foldAll(context: CommandContext): void {
+  const canonical = context.getCanonicalElements();
+  const index = foldingIndex(canonical);
+  const branchIds = [...index.nodes.keys()].filter((nodeId) => (index.children.get(nodeId)?.length ?? 0) > 0);
+  applyFoldState(context, branchIds, true, "All branches collapsed.");
+}
+
+function unfoldAll(context: CommandContext): void {
+  const canonical = context.getCanonicalElements();
+  applyFoldState(context, [...foldingIndex(canonical).nodes.keys()], false, "All branches expanded.");
+}
+
 export function canPasteMindmapText(text: string): boolean {
   return text.startsWith("offline-mindmap-subtree:") || isOutlinePaste(text);
 }
@@ -499,6 +609,12 @@ export const commandRegistry: readonly Command[] = [
   { id: "paste-subtree", label: "Paste subtree", shortcut: "Cmd/Ctrl+V", keywords: "clipboard paste branch", execute: pasteSubtree },
   { id: "duplicate-subtree", label: "Duplicate subtree", shortcut: "Cmd/Ctrl+D", keywords: "copy duplicate branch", execute: duplicateSubtree },
   { id: "delete-subtree", label: "Delete subtree", shortcut: "Delete", keywords: "remove branch", execute: removeSelectedSubtrees },
+  { id: "toggle-fold", label: "Collapse or expand selected branch", shortcut: "", keywords: "fold unfold hide descendants", execute: toggleSelectedFold },
+  { id: "toggle-sibling-folds", label: "Collapse or expand sibling branches", shortcut: "", keywords: "fold unfold siblings", execute: toggleSiblingFolds },
+  { id: "fold-one-level", label: "Collapse one visible level", shortcut: "", keywords: "fold depth level", execute: foldOneVisibleLevel },
+  { id: "unfold-one-level", label: "Expand one level", shortcut: "", keywords: "unfold reveal depth level", execute: unfoldOneLevel },
+  { id: "fold-all", label: "Collapse all branches", shortcut: "", keywords: "fold hide all levels", execute: foldAll },
+  { id: "unfold-all", label: "Expand all branches", shortcut: "", keywords: "unfold reveal all levels", execute: unfoldAll },
   { id: "reflow-map", label: "Rearrange mind map", shortcut: "", keywords: "layout reflow space overlap branches", execute: reflowMap },
   { id: "add-relationship", label: "Connect selected nodes as a relationship", shortcut: "", keywords: "arrow cross connection", execute: addRelationship },
   { id: "command-palette", label: "Open command palette", shortcut: "Cmd/Ctrl+K", keywords: "search commands", execute: (c) => c.openPalette() },

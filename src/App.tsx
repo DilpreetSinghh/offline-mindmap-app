@@ -24,8 +24,10 @@ import {
   createId,
   createTemplateDocument,
   getMindmapNode,
+  mergeFoldedScene,
   normaliseConnectionBindings,
   normaliseRootlessWhiteboard,
+  projectFoldedElements,
   validateDocument,
 } from "./document";
 import {
@@ -48,6 +50,7 @@ import {
   renameMindmapNode,
 } from "./mindmap-operations";
 import "./app.css";
+import { setNodesCollapsed } from "./folding.mjs";
 
 const EDITOR_MODE_KEY = "offline-mindmap-editor-mode-v1";
 const SURFACE_MODE_KEY = "offline-mindmap-surface-mode-v1";
@@ -123,7 +126,8 @@ function isMindmapSelection(api: ExcalidrawImperativeAPI): boolean {
 }
 
 function currentSceneDocument(tab: EditorTab, api: ExcalidrawImperativeAPI): DocumentV3 {
-  const rootless = normaliseRootlessWhiteboard(api.getSceneElements(), tab.document.rootNodeId);
+  const merged = mergeFoldedScene(tab.document.scene.elements, api.getSceneElements());
+  const rootless = normaliseRootlessWhiteboard(merged, tab.document.rootNodeId);
   return {
     ...tab.document,
     updatedAt: new Date().toISOString(),
@@ -170,8 +174,12 @@ export default function App() {
   activeKeyRef.current = activeKey;
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.key === activeKey) ?? null, [activeKey, tabs]);
-  const activeTabRef = useRef<EditorTab | null>(null);
-  activeTabRef.current = activeTab;
+  const activeTabRef = useRef<EditorTab | null>(activeTab);
+  if (activeTabRef.current?.key !== activeTab?.key) activeTabRef.current = activeTab;
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   useEffect(() => {
     if (!activeTab) return;
@@ -214,7 +222,7 @@ export default function App() {
         const initialTab = { key: createId("tab"), document: initialDocument, persisted };
         setTabs([initialTab]);
         setActiveKey(initialTab.key);
-        lastValidElementsRef.current = initialDocument.scene.elements;
+        lastValidElementsRef.current = projectFoldedElements(initialDocument.scene.elements);
         if (library && apiRef.current) await apiRef.current.updateLibrary({ libraryItems: library as LibraryItems });
         if (migration.errors.length) {
           announce(`Migration paused: ${migration.errors[0]}`, "error");
@@ -308,6 +316,15 @@ export default function App() {
     return {
       api: apiRef.current,
       rootNodeId: activeTabRef.current?.document.rootNodeId ?? "root",
+      getCanonicalElements: () => activeTabRef.current?.document.scene.elements ?? apiRef.current?.getSceneElements() ?? [],
+      stageCanonicalElements: (elements) => {
+        const tab = activeTabRef.current;
+        if (!tab) return;
+        activeTabRef.current = {
+          ...tab,
+          document: { ...tab.document, scene: { ...tab.document.scene, elements } },
+        };
+      },
       openPalette: () => setPaletteOpen(true),
       openHelp: () => setHelpOpen(true),
       announce,
@@ -424,7 +441,7 @@ export default function App() {
     }
     const nextTab = { ...tab, document };
     activeTabRef.current = nextTab;
-    lastValidElementsRef.current = elements;
+    lastValidElementsRef.current = projectFoldedElements(elements);
     setTabs((current) => current.map((item) => item.key === tab.key ? nextTab : item));
     setSimpleSelectedNodeId(selectedNodeId);
     scheduleRecovery(document);
@@ -461,12 +478,25 @@ export default function App() {
     applySimpleElements(remaining, tab.document.rootNodeId, "Branch deleted and remaining nodes rearranged.");
   }, [announce, applySimpleElements]);
 
+  const toggleSimpleFold = useCallback((nodeId: string) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const node = tab.document.scene.elements.map(getMindmapNode).find((item) => item?.nodeId === nodeId);
+    if (!node) return;
+    applySimpleElements(
+      setNodesCollapsed(tab.document.scene.elements, [nodeId], !node.collapsed),
+      nodeId,
+      node.collapsed ? "Branch expanded." : "Branch collapsed.",
+    );
+  }, [applySimpleElements]);
+
   const onSceneChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
       const tab = activeTabRef.current;
       const api = apiRef.current;
       if (!tab || !api || semanticUpdateRef.current) return;
-      const rootless = normaliseRootlessWhiteboard(elements, tab.document.rootNodeId);
+      const merged = mergeFoldedScene(tab.document.scene.elements, elements);
+      const rootless = normaliseRootlessWhiteboard(merged, tab.document.rootNodeId);
       const normalised = normaliseConnectionBindings(rootless.elements);
       if (normalised.errors.length) {
         semanticUpdateRef.current = true;
@@ -488,10 +518,10 @@ export default function App() {
         announce(validation.errors[0], "error");
         return;
       }
-      lastValidElementsRef.current = normalised.elements;
+      lastValidElementsRef.current = projectFoldedElements(normalised.elements);
       if (rootless.changed || normalised.changed) {
         semanticUpdateRef.current = true;
-        api.updateScene({ elements: normalised.elements, captureUpdate: CaptureUpdateAction.NEVER });
+        api.updateScene({ elements: projectFoldedElements(normalised.elements), captureUpdate: CaptureUpdateAction.NEVER });
         semanticUpdateRef.current = false;
       }
       activeTabRef.current = { ...tab, document };
@@ -515,7 +545,7 @@ export default function App() {
       const tab = { key: createId("tab"), document, persisted: true };
       setTabs((current) => [...current, tab]);
       setActiveKey(tab.key);
-      lastValidElementsRef.current = document.scene.elements;
+      lastValidElementsRef.current = projectFoldedElements(document.scene.elements);
     },
     [captureActiveTab, savedDocuments, updateCapturedTab],
   );
@@ -526,7 +556,7 @@ export default function App() {
     const tab = { key: createId("tab"), document: prepareDocument(createBlankDocument(`Untitled ${tabsRef.current.length + 1}`)), persisted: false };
     setTabs((current) => [...current, tab]);
     setActiveKey(tab.key);
-    lastValidElementsRef.current = tab.document.scene.elements;
+    lastValidElementsRef.current = projectFoldedElements(tab.document.scene.elements);
   }, [captureActiveTab, updateCapturedTab]);
 
   const newTemplateTab = useCallback((template: "mindmap" | "brainstorm") => {
@@ -535,7 +565,7 @@ export default function App() {
     const tab = { key: createId("tab"), document: prepareDocument(createTemplateDocument(template)), persisted: false };
     setTabs((current) => [...current, tab]);
     setActiveKey(tab.key);
-    lastValidElementsRef.current = tab.document.scene.elements;
+    lastValidElementsRef.current = projectFoldedElements(tab.document.scene.elements);
   }, [captureActiveTab, updateCapturedTab]);
 
   const closeTab = useCallback(
@@ -662,7 +692,7 @@ export default function App() {
             const captured = captureActiveTab();
             if (captured) updateCapturedTab(captured);
             setActiveKey(tab.key);
-            lastValidElementsRef.current = tab.document.scene.elements;
+            lastValidElementsRef.current = projectFoldedElements(tab.document.scene.elements);
           }}>
             <span>{tab.document.name}</span>{!tab.persisted ? <i>Draft</i> : null}
             {tabs.length > 1 ? <b role="button" aria-label={`Close ${tab.document.name}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }}>×</b> : null}
@@ -679,6 +709,7 @@ export default function App() {
             <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>Enter</kbd></button>
             <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
             <button type="button" onClick={() => executeCommand("reflow-map")}><strong>Rearrange map</strong><span>Fix spacing</span></button>
+            <button type="button" onClick={() => executeCommand("toggle-fold")}><strong>Fold branch</strong><span>Hide/show</span></button>
             <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>{displayShortcut("Cmd/Ctrl+D")}</kbd></button>
             <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
             <div className="rail-note"><b>Fast mapping</b><p>Double-click to edit text. Cmd/Ctrl + arrow grows a branch; plain arrows move selection.</p></div>
@@ -689,12 +720,12 @@ export default function App() {
               key={activeTab.key}
               excalidrawAPI={(api) => {
                 apiRef.current = api;
-                lastValidElementsRef.current = activeTab.document.scene.elements;
+                lastValidElementsRef.current = projectFoldedElements(activeTab.document.scene.elements);
                 fitWhiteboardOnMountRef.current = false;
                 void getLibrary().then((library) => library && api.updateLibrary({ libraryItems: library as LibraryItems }));
               }}
               initialData={{
-                elements: activeTab.document.scene.elements,
+                elements: projectFoldedElements(activeTab.document.scene.elements),
                 appState: { ...activeTab.document.scene.appState, name: activeTab.document.name },
                 files: activeTab.document.scene.files,
                 scrollToContent: fitWhiteboardOnMountRef.current,
@@ -756,6 +787,7 @@ export default function App() {
             onAddChild={addSimpleChild}
             onAddSibling={addSimpleSibling}
             onDelete={deleteSimpleNode}
+            onToggleFold={toggleSimpleFold}
           />
         </section>
       )}

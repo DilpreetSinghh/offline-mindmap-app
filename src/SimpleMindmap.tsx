@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { getMindmapConnection, getMindmapNode } from "./document";
+import { foldingIndex } from "./folding.mjs";
 
 type SimpleNode = {
   nodeId: string;
@@ -8,6 +9,9 @@ type SimpleNode = {
   siblingOrder: number;
   depth: number;
   text: string;
+  collapsed: boolean;
+  childCount: number;
+  hiddenDescendantCount: number;
 };
 
 type SimpleMindmapProps = {
@@ -19,6 +23,7 @@ type SimpleMindmapProps = {
   onAddChild: (nodeId: string) => void;
   onAddSibling: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onToggleFold: (nodeId: string) => void;
 };
 
 const HierarchyArrow = memo(function HierarchyArrow({ depth }: { depth: number }) {
@@ -40,6 +45,7 @@ type SimpleNodeRowProps = {
   onAddChild: (nodeId: string) => void;
   onAddSibling: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onToggleFold: (nodeId: string) => void;
 };
 
 const SimpleNodeRow = memo(function SimpleNodeRow({
@@ -51,6 +57,7 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
   onAddChild,
   onAddSibling,
   onDelete,
+  onToggleFold,
 }: SimpleNodeRowProps) {
   const [draft, setDraft] = useState(node.text);
   useEffect(() => setDraft(node.text), [node.text]);
@@ -82,6 +89,7 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
           />
         </label>
         <div className="simple-node-actions" aria-label={`Actions for ${node.text}`}>
+          {node.childCount ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleFold(node.nodeId); }}>{node.collapsed ? `Expand +${node.hiddenDescendantCount}` : "Collapse"}</button> : null}
           <button type="button" onClick={(event) => { event.stopPropagation(); onAddChild(node.nodeId); }}>+ Child</button>
           {node.nodeId !== rootNodeId
             ? <button type="button" onClick={(event) => { event.stopPropagation(); onAddSibling(node.nodeId); }}>+ Sibling</button>
@@ -104,6 +112,7 @@ export default function SimpleMindmap({
   onAddChild,
   onAddSibling,
   onDelete,
+  onToggleFold,
 }: SimpleMindmapProps) {
   const { rows, relationships, hiddenObjects } = useMemo(() => {
     const textByContainer = new Map(
@@ -126,6 +135,7 @@ export default function SimpleMindmap({
     for (const siblings of byParent.values()) {
       siblings.sort((a, b) => a.siblingOrder - b.siblingOrder || a.nodeId.localeCompare(b.nodeId));
     }
+    const foldState = foldingIndex(elements);
     const flattened: SimpleNode[] = [];
     const visited = new Set<string>();
     const visit = (nodeId: string, depth: number) => {
@@ -133,16 +143,25 @@ export default function SimpleMindmap({
       const node = byId.get(nodeId);
       if (!node) return;
       visited.add(nodeId);
-      flattened.push({ ...node, depth });
-      for (const child of byParent.get(nodeId) ?? []) visit(child.nodeId, depth + 1);
+      const children = byParent.get(nodeId) ?? [];
+      flattened.push({
+        ...node,
+        depth,
+        childCount: children.length,
+        hiddenDescendantCount: foldState.hiddenDescendantCount.get(nodeId) ?? 0,
+      });
+      if (!node.collapsed) for (const child of children) visit(child.nodeId, depth + 1);
     };
     visit(rootNodeId, 0);
-    for (const node of nodes) if (!visited.has(node.nodeId)) visit(node.nodeId, 0);
+    for (const node of nodes) {
+      if (!visited.has(node.nodeId) && !foldState.hiddenNodeIds.has(node.nodeId)) visit(node.nodeId, 0);
+    }
 
+    const visibleNodeIds = new Set(flattened.map((node) => node.nodeId));
     const names = new Map(nodes.map((node) => [node.nodeId, node.text]));
     const relationLabels = elements.flatMap((element) => {
       const connection = getMindmapConnection(element);
-      if (connection?.role !== "relationship") return [];
+      if (connection?.role !== "relationship" || !visibleNodeIds.has(connection.fromNodeId) || !visibleNodeIds.has(connection.toNodeId)) return [];
       return [`${names.get(connection.fromNodeId) ?? "Node"} ↔ ${names.get(connection.toNodeId) ?? "Node"}`];
     });
     const nodeElementIds = new Set(elements.filter((element) => getMindmapNode(element)).map((element) => element.id));
@@ -184,6 +203,7 @@ export default function SimpleMindmap({
             onAddChild={onAddChild}
             onAddSibling={onAddSibling}
             onDelete={onDelete}
+            onToggleFold={onToggleFold}
           />
         ))}
       </div>

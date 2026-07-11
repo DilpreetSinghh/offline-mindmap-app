@@ -14,6 +14,7 @@ import {
   type MindmapNodeData,
 } from "./types";
 import { validateHierarchyIndex } from "./hierarchy-index.mjs";
+import { foldingIndex, mergeFoldedElements, visibleFoldedElements } from "./folding.mjs";
 export { normaliseRootlessWhiteboard } from "./rootless-whiteboard.mjs";
 
 export function createId(prefix: string): string {
@@ -31,6 +32,43 @@ export function getMindmapConnection(element: ExcalidrawElement): MindmapConnect
   const value = element.customData?.mindmapConnection;
   if (!value || typeof value !== "object") return null;
   return value as MindmapConnectionData;
+}
+
+export function projectFoldedElements(
+  elements: readonly OrderedExcalidrawElement[],
+): OrderedExcalidrawElement[] {
+  const visible = visibleFoldedElements(elements) as OrderedExcalidrawElement[];
+  const index = foldingIndex(elements);
+  const badges: ExcalidrawElementSkeleton[] = [];
+  for (const [nodeId, count] of index.hiddenDescendantCount as Map<string, number>) {
+    const shape = index.shapeByNodeId.get(nodeId) as OrderedExcalidrawElement | undefined;
+    if (!shape || count < 1) continue;
+    badges.push({
+      type: "text",
+      id: `fold-badge-${shape.id}`,
+      x: shape.x + shape.width - 8,
+      y: shape.y - 22,
+      text: `＋${count}`,
+      fontSize: 14,
+      textAlign: "center",
+      verticalAlign: "middle",
+      strokeColor: "#7a4b0b",
+      backgroundColor: "transparent",
+      locked: true,
+      customData: { foldBadge: { ownerElementId: shape.id, hiddenCount: count } },
+    });
+  }
+  const convertedBadges = badges.length
+    ? convertToExcalidrawElements(badges, { regenerateIds: false })
+    : [];
+  return [...visible, ...convertedBadges];
+}
+
+export function mergeFoldedScene(
+  canonical: readonly OrderedExcalidrawElement[],
+  projected: readonly OrderedExcalidrawElement[],
+): OrderedExcalidrawElement[] {
+  return mergeFoldedElements(canonical, projected) as OrderedExcalidrawElement[];
 }
 
 export function createMindmapElements(
