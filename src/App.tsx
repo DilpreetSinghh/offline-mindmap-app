@@ -8,7 +8,16 @@ import {
 import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import { commandForKeyboardEvent, commandRegistry, findCommand, formatShortcutLabel, type CommandContext, type CommandId } from "./commands";
+import {
+  canPasteMindmapText,
+  commandForKeyboardEvent,
+  commandRegistry,
+  findCommand,
+  formatShortcutLabel,
+  pasteMindmapText,
+  type CommandContext,
+  type CommandId,
+} from "./commands";
 import {
   assertValidDocument,
   createBlankDocument,
@@ -343,6 +352,26 @@ export default function App() {
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [executeCommand, helpOpen, paletteOpen, saveLocally]);
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const api = apiRef.current;
+      const context = commandContext();
+      if (!api || !context || !isMindmapSelection(api) || api.getAppState().editingTextElement) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (
+        target.isContentEditable
+        || target.closest("input, textarea, select, button, [role='textbox'], [contenteditable='true']")
+      )) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (!canPasteMindmapText(text)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pasteMindmapText(context, text);
+    };
+    document.addEventListener("paste", onPaste, true);
+    return () => document.removeEventListener("paste", onPaste, true);
+  }, [commandContext]);
 
   const scheduleRecovery = useCallback(
     (document: DocumentV3) => {

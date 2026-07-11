@@ -9,10 +9,11 @@ import {
   getMindmapNodeText,
   reflowConnectedMindmapTree,
   reflowMindmapElements,
-  removeMindmapSubtree,
+  removeMindmapSubtrees,
 } from "./mindmap-operations";
-import type { MindmapNodeData } from "./types";
+import type { MindmapConnectionData, MindmapNodeData } from "./types";
 import { routeMindmapShortcut } from "./shortcut-routing.mjs";
+import { isOutlinePaste, parseIndentedOutline } from "./outline-format.mjs";
 
 export { formatShortcutLabel } from "./shortcut-routing.mjs";
 
@@ -58,9 +59,18 @@ type ClipboardNode = {
   text: string;
   x: number;
   y: number;
+  shape: OrderedExcalidrawElement;
+  label: OrderedExcalidrawElement | null;
 };
 
-type SubtreeClipboard = { rootNodeId: string; nodes: ClipboardNode[] };
+type ClipboardConnection = { data: MindmapConnectionData; element: OrderedExcalidrawElement };
+type SubtreeClipboard = {
+  format: "offline-mindmap-subtree";
+  version: 2;
+  rootNodeId: string;
+  nodes: ClipboardNode[];
+  connections: ClipboardConnection[];
+};
 let subtreeClipboard: SubtreeClipboard | null = null;
 
 function selectedNodeElements(api: ExcalidrawImperativeAPI): OrderedExcalidrawElement[] {
@@ -187,9 +197,22 @@ function collectSubtree(api: ExcalidrawImperativeAPI): SubtreeClipboard | null {
   const nodes = elements.flatMap((element) => {
     const data = getMindmapNode(element);
     if (!data || !wanted.has(data.nodeId)) return [];
-    return [{ data: structuredClone(data), text: getNodeText(elements, element.id), x: element.x, y: element.y }];
+    const label = elements.find((candidate) => candidate.type === "text" && candidate.containerId === element.id) ?? null;
+    return [{
+      data: structuredClone(data),
+      text: getNodeText(elements, element.id),
+      x: element.x,
+      y: element.y,
+      shape: structuredClone(element),
+      label: label ? structuredClone(label) : null,
+    }];
   });
-  return { rootNodeId: rootData.nodeId, nodes };
+  const connections = elements.flatMap((element) => {
+    const data = getMindmapConnection(element);
+    if (!data || !wanted.has(data.fromNodeId) || !wanted.has(data.toNodeId)) return [];
+    return [{ data: structuredClone(data), element: structuredClone(element) }];
+  });
+  return { format: "offline-mindmap-subtree", version: 2, rootNodeId: rootData.nodeId, nodes, connections };
 }
 
 async function copySubtree(context: CommandContext): Promise<void> {
@@ -203,64 +226,229 @@ async function copySubtree(context: CommandContext): Promise<void> {
   context.announce(`Copied ${subtreeClipboard.nodes.length} mind-map node(s).`);
 }
 
-function removeSubtree(context: CommandContext): void {
-  const clipboard = collectSubtree(context.api);
-  const selected = primaryNode(context.api);
-  const selectedNode = selected ? getMindmapNode(selected) : null;
-  if (!clipboard || !selectedNode || selectedNode.parentNodeId === null) {
-    context.announce("The root node cannot be cut.", "error");
+function removeNodeIds(context: CommandContext, nodeIds: readonly string[]): void {
+  if (!nodeIds.length) return;
+  if (nodeIds.includes(context.rootNodeId)) {
+    context.announce("The root node cannot be deleted.", "error");
     return;
   }
   const elements = context.api.getSceneElements();
-  const rootNodeId = elements.map(getMindmapNode).find((node) => node?.parentNodeId === null)?.nodeId ?? "root";
-  const remaining = removeMindmapSubtree(elements, clipboard.rootNodeId, rootNodeId);
+  const remaining = removeMindmapSubtrees(elements, nodeIds, context.rootNodeId);
   if (!remaining) return;
   transact(context.api, remaining, []);
 }
 
-async function cutSubtree(context: CommandContext): Promise<void> {
-  await copySubtree(context);
-  removeSubtree(context);
+function removeSelectedSubtrees(context: CommandContext): void {
+  const selected = selectedNodeElements(context.api).map((element) => getMindmapNode(element)!.nodeId);
+  if (!selected.length) return;
+  removeNodeIds(context, selected);
+  if (!selected.includes(context.rootNodeId)) context.announce(`Deleted ${selected.length} selected branch${selected.length === 1 ? "" : "es"}.`);
 }
 
-function pasteSubtree(context: CommandContext): void {
-  const target = primaryNode(context.api);
-  if (!subtreeClipboard || !target) {
+async function cutSubtree(context: CommandContext): Promise<void> {
+  await copySubtree(context);
+  if (subtreeClipboard) removeNodeIds(context, [subtreeClipboard.rootNodeId]);
+}
+
+function isSubtreeClipboard(value: unknown): value is SubtreeClipboard {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SubtreeClipboard>;
+  return candidate.format === "offline-mindmap-subtree"
+    && candidate.version === 2
+    && typeof candidate.rootNodeId === "string"
+    && Array.isArray(candidate.nodes)
+    && candidate.nodes.length > 0
+    && Array.isArray(candidate.connections);
+}
+
+function appendStyledConnection(
+  scene: readonly OrderedExcalidrawElement[],
+  fromElementId: string,
+  toElementId: string,
+  fromNodeId: string,
+  toNodeId: string,
+  role: MindmapConnectionData["role"],
+  source?: OrderedExcalidrawElement,
+): OrderedExcalidrawElement[] {
+  const existingIds = new Set(scene.map((element) => element.id));
+  const next = appendBoundConnection(scene, fromElementId, toElementId, fromNodeId, toNodeId, role);
+  if (!source) return next;
+  const created = next.find((element) => !existingIds.has(element.id) && element.type === "arrow");
+  if (!created) return next;
+  return next.map((element) => element.id === created.id ? {
+    ...element,
+    strokeColor: source.strokeColor,
+    backgroundColor: source.backgroundColor,
+    fillStyle: source.fillStyle,
+    strokeWidth: source.strokeWidth,
+    strokeStyle: source.strokeStyle,
+    roughness: source.roughness,
+    opacity: source.opacity,
+    startArrowhead: source.type === "arrow" ? source.startArrowhead : null,
+    endArrowhead: source.type === "arrow" ? source.endArrowhead : "arrow",
+  } as OrderedExcalidrawElement : element);
+}
+
+function pasteSubtree(
+  context: CommandContext,
+  clipboard = subtreeClipboard,
+  targetOverride?: OrderedExcalidrawElement | null,
+): void {
+  const target = targetOverride ?? primaryNode(context.api);
+  if (!clipboard || !target) {
     context.announce("Copy a subtree and select a destination node first.", "error");
     return;
   }
   const targetData = getMindmapNode(target)!;
   const elements = context.api.getSceneElements();
-  const sourceRoot = subtreeClipboard.nodes.find((node) => node.data.nodeId === subtreeClipboard!.rootNodeId)!;
-  const idMap = new Map(subtreeClipboard.nodes.map((node) => [node.data.nodeId, createId("node")]));
+  const sourceRoot = clipboard.nodes.find((node) => node.data.nodeId === clipboard.rootNodeId);
+  if (!sourceRoot) {
+    context.announce("The copied subtree is invalid.", "error");
+    return;
+  }
+  const idMap = new Map(clipboard.nodes.map((node) => [node.data.nodeId, createId("node")]));
   const shapeByNodeId = new Map<string, string>();
   const additions: OrderedExcalidrawElement[] = [];
-  let combinedScene = [...elements, ...additions];
-  for (const source of subtreeClipboard.nodes) {
+  for (const source of clipboard.nodes) {
     const nodeId = idMap.get(source.data.nodeId)!;
-    const isRoot = source.data.nodeId === subtreeClipboard.rootNodeId;
+    const isRoot = source.data.nodeId === clipboard.rootNodeId;
     const parentNodeId = isRoot ? targetData.nodeId : idMap.get(source.data.parentNodeId!)!;
-    const created = createMindmapElements(
+    const x = target.x + 280 + source.x - sourceRoot.x;
+    const y = target.y + source.y - sourceRoot.y;
+    const shapeId = createId("shape");
+    const labelId = source.label ? createId("label") : null;
+    const data: MindmapNodeData = {
+      ...structuredClone(source.data),
       nodeId,
-      source.text,
-      target.x + 280 + source.x - sourceRoot.x,
-      target.y + source.y - sourceRoot.y,
       parentNodeId,
-      isRoot ? nextSiblingOrder(elements, targetData.nodeId) : source.data.siblingOrder,
-    );
-    const shape = created.find((element) => getMindmapNode(element))!;
-    shapeByNodeId.set(nodeId, shape.id);
-    additions.push(...created);
+      siblingOrder: isRoot ? nextSiblingOrder(elements, targetData.nodeId) : source.data.siblingOrder,
+    };
+    const shape = {
+      ...structuredClone(source.shape),
+      id: shapeId,
+      x,
+      y,
+      isDeleted: false,
+      groupIds: [],
+      boundElements: labelId ? [{ id: labelId, type: "text" as const }] : [],
+      customData: { ...source.shape.customData, mindmapNode: data },
+      updated: Date.now(),
+    } as OrderedExcalidrawElement;
+    additions.push(shape);
+    if (source.label && labelId) additions.push({
+      ...structuredClone(source.label),
+      id: labelId,
+      x: x + source.label.x - source.x,
+      y: y + source.label.y - source.y,
+      containerId: shapeId,
+      isDeleted: false,
+      groupIds: [],
+      updated: Date.now(),
+    } as OrderedExcalidrawElement);
+    shapeByNodeId.set(nodeId, shapeId);
   }
-  for (const source of subtreeClipboard.nodes) {
+  let combinedScene = [...elements, ...additions];
+  for (const source of clipboard.nodes) {
     const nodeId = idMap.get(source.data.nodeId)!;
-    const isRoot = source.data.nodeId === subtreeClipboard.rootNodeId;
+    const isRoot = source.data.nodeId === clipboard.rootNodeId;
     const parentNodeId = isRoot ? targetData.nodeId : idMap.get(source.data.parentNodeId!)!;
     const parentElementId = isRoot ? target.id : shapeByNodeId.get(parentNodeId)!;
-    combinedScene = appendBoundConnection(combinedScene, parentElementId, shapeByNodeId.get(nodeId)!, parentNodeId, nodeId, "hierarchy");
+    const sourceConnection = clipboard.connections.find((connection) => (
+      connection.data.role === "hierarchy" && connection.data.toNodeId === source.data.nodeId
+    ));
+    combinedScene = appendStyledConnection(
+      combinedScene,
+      parentElementId,
+      shapeByNodeId.get(nodeId)!,
+      parentNodeId,
+      nodeId,
+      "hierarchy",
+      sourceConnection?.element,
+    );
   }
-  const selected = shapeByNodeId.get(idMap.get(subtreeClipboard.rootNodeId)!)!;
-  transact(context.api, reflowMindmapElements(combinedScene), [selected]);
+  for (const connection of clipboard.connections.filter((item) => item.data.role === "relationship")) {
+    const fromNodeId = idMap.get(connection.data.fromNodeId);
+    const toNodeId = idMap.get(connection.data.toNodeId);
+    if (!fromNodeId || !toNodeId) continue;
+    combinedScene = appendStyledConnection(
+      combinedScene,
+      shapeByNodeId.get(fromNodeId)!,
+      shapeByNodeId.get(toNodeId)!,
+      fromNodeId,
+      toNodeId,
+      "relationship",
+      connection.element,
+    );
+  }
+  const selected = shapeByNodeId.get(idMap.get(clipboard.rootNodeId)!)!;
+  transact(context.api, combinedScene, [selected]);
+  context.announce(`Pasted ${clipboard.nodes.length} node${clipboard.nodes.length === 1 ? "" : "s"} with styles and connections.`);
+}
+
+async function duplicateSubtree(context: CommandContext): Promise<void> {
+  const selected = primaryNode(context.api);
+  const selectedData = selected && getMindmapNode(selected);
+  if (!selected || !selectedData) return;
+  const parent = selectedData.parentNodeId
+    ? context.api.getSceneElements().find((element) => getMindmapNode(element)?.nodeId === selectedData.parentNodeId)
+    : selected;
+  await copySubtree(context);
+  pasteSubtree(context, subtreeClipboard, parent);
+}
+
+function pasteOutline(context: CommandContext, text: string): void {
+  const target = primaryNode(context.api);
+  const records = parseIndentedOutline(text);
+  if (!target || !records.length) return;
+  const targetData = getMindmapNode(target)!;
+  const idByIndex = new Map<number, string>();
+  const shapeByIndex = new Map<number, string>();
+  let scene = [...context.api.getSceneElements()];
+  const siblingState = new Map<string, { base: number; count: number }>([
+    [targetData.nodeId, { base: nextSiblingOrder(scene, targetData.nodeId), count: 0 }],
+  ]);
+  records.forEach((record, index) => {
+    const nodeId = createId("node");
+    const parentNodeId = record.parentIndex === null ? targetData.nodeId : idByIndex.get(record.parentIndex)!;
+    const siblings = siblingState.get(parentNodeId) ?? { base: 0, count: 0 };
+    const siblingOrder = siblings.base + siblings.count;
+    siblingState.set(parentNodeId, { ...siblings, count: siblings.count + 1 });
+    const created = createMindmapElements(
+      nodeId,
+      record.text,
+      target.x + 280 + record.depth * 230,
+      target.y + (index - (records.length - 1) / 2) * 120,
+      parentNodeId,
+      siblingOrder,
+    );
+    const shape = created.find((element) => getMindmapNode(element))!;
+    scene.push(...created);
+    const parentElementId = record.parentIndex === null ? target.id : shapeByIndex.get(record.parentIndex)!;
+    scene = appendBoundConnection(scene, parentElementId, shape.id, parentNodeId, nodeId, "hierarchy");
+    idByIndex.set(index, nodeId);
+    shapeByIndex.set(index, shape.id);
+  });
+  transact(context.api, reflowMindmapElements(scene, context.rootNodeId), [...shapeByIndex.values()]);
+  context.announce(`Pasted ${records.length} outline node${records.length === 1 ? "" : "s"}.`);
+}
+
+export function canPasteMindmapText(text: string): boolean {
+  return text.startsWith("offline-mindmap-subtree:") || isOutlinePaste(text);
+}
+
+export function pasteMindmapText(context: CommandContext, text: string): void {
+  if (text.startsWith("offline-mindmap-subtree:")) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice("offline-mindmap-subtree:".length));
+      if (!isSubtreeClipboard(parsed)) throw new Error("Unsupported subtree clipboard format.");
+      subtreeClipboard = parsed;
+      pasteSubtree(context, parsed);
+    } catch (error) {
+      context.announce(`Paste failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+    return;
+  }
+  if (isOutlinePaste(text)) pasteOutline(context, text);
 }
 
 function addRelationship(context: CommandContext): void {
@@ -309,8 +497,8 @@ export const commandRegistry: readonly Command[] = [
   { id: "copy-subtree", label: "Copy subtree", shortcut: "Cmd/Ctrl+C", keywords: "clipboard copy branch", execute: copySubtree },
   { id: "cut-subtree", label: "Cut subtree", shortcut: "Cmd/Ctrl+X", keywords: "clipboard cut branch", execute: cutSubtree },
   { id: "paste-subtree", label: "Paste subtree", shortcut: "Cmd/Ctrl+V", keywords: "clipboard paste branch", execute: pasteSubtree },
-  { id: "duplicate-subtree", label: "Duplicate subtree", shortcut: "Cmd/Ctrl+D", keywords: "copy duplicate branch", execute: async (c) => { await copySubtree(c); pasteSubtree(c); } },
-  { id: "delete-subtree", label: "Delete subtree", shortcut: "Delete", keywords: "remove branch", execute: removeSubtree },
+  { id: "duplicate-subtree", label: "Duplicate subtree", shortcut: "Cmd/Ctrl+D", keywords: "copy duplicate branch", execute: duplicateSubtree },
+  { id: "delete-subtree", label: "Delete subtree", shortcut: "Delete", keywords: "remove branch", execute: removeSelectedSubtrees },
   { id: "reflow-map", label: "Rearrange mind map", shortcut: "", keywords: "layout reflow space overlap branches", execute: reflowMap },
   { id: "add-relationship", label: "Connect selected nodes as a relationship", shortcut: "", keywords: "arrow cross connection", execute: addRelationship },
   { id: "command-palette", label: "Open command palette", shortcut: "Cmd/Ctrl+K", keywords: "search commands", execute: (c) => c.openPalette() },

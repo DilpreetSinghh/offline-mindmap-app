@@ -25,6 +25,7 @@ test("does not intercept editing, form controls or browser modifier combinations
   assert.equal(routeMindmapShortcut({ key: "ArrowLeft", altKey: true }), null);
   assert.equal(routeMindmapShortcut({ key: "ArrowLeft", shiftKey: true }), null);
   assert.equal(routeMindmapShortcut({ key: "Tab", shiftKey: true }), null);
+  assert.equal(routeMindmapShortcut({ key: "v", metaKey: true }), null);
 });
 
 test("formats platform-appropriate modifier labels", () => {

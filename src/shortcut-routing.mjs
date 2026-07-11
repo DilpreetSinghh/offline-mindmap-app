@@ -19,7 +19,7 @@ export function routeMindmapShortcut(event, state = {}) {
   if (!modifier && key === "Enter") return "new-sibling";
   if (modifier && key.toLowerCase() === "c") return "copy-subtree";
   if (modifier && key.toLowerCase() === "x") return "cut-subtree";
-  if (modifier && key.toLowerCase() === "v") return "paste-subtree";
+  // Cmd/Ctrl+V is handled by the paste event so external list data remains available.
   if (modifier && key.toLowerCase() === "d") return "duplicate-subtree";
   if (!modifier && (key === "Delete" || key === "Backspace")) return "delete-subtree";
   return null;

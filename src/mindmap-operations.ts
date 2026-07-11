@@ -10,6 +10,7 @@ import {
 } from "./document";
 import { calculateTreeLayout, shouldReflowAfterInsertion } from "./tree-layout.mjs";
 import { inferBoundTree } from "./bound-tree.mjs";
+import { expandSelectedBranches } from "./subtree-selection.mjs";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
 
@@ -243,19 +244,22 @@ export function removeMindmapSubtree(
   nodeId: string,
   rootNodeId = "root",
 ): OrderedExcalidrawElement[] | null {
-  if (nodeId === rootNodeId) return null;
-  const wanted = new Set([nodeId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const element of elements) {
-      const node = getMindmapNode(element);
-      if (node?.parentNodeId && wanted.has(node.parentNodeId) && !wanted.has(node.nodeId)) {
-        wanted.add(node.nodeId);
-        changed = true;
-      }
-    }
-  }
+  return removeMindmapSubtrees(elements, [nodeId], rootNodeId);
+}
+
+export function removeMindmapSubtrees(
+  elements: readonly OrderedExcalidrawElement[],
+  nodeIds: readonly string[],
+  rootNodeId = "root",
+): OrderedExcalidrawElement[] | null {
+  const records = elements.flatMap((element) => {
+    const node = getMindmapNode(element);
+    return node ? [{ nodeId: node.nodeId, parentNodeId: node.parentNodeId }] : [];
+  });
+  const expanded = expandSelectedBranches(records, nodeIds, rootNodeId);
+  if (expanded.blockedByRoot) return null;
+  const wanted = new Set(expanded.nodeIds);
+  if (!wanted.size) return [...elements];
   const shapeIds = new Set(
     elements
       .filter((element) => wanted.has(getMindmapNode(element)?.nodeId ?? ""))
