@@ -10,6 +10,7 @@ export function routeMindmapShortcut(event, state = {}) {
   const key = event.key ?? "";
   const modifier = Boolean(event.metaKey || event.ctrlKey);
   if (modifier && !event.altKey && key.toLowerCase() === "k") return "command-palette";
+  if (modifier && !event.altKey && key.toLowerCase() === "f") return "search-map";
   if (state.editing || state.formControl) return null;
   if (!modifier && !event.altKey && key === "?") return "shortcut-help";
   if (event.altKey || event.shiftKey) return null;

@@ -46,11 +46,13 @@ import SimpleMindmap from "./SimpleMindmap";
 import {
   addConnectedMindmapNode,
   ensureEditableMindmapElements,
+  replaceMindmapNodeTexts,
   removeMindmapSubtree,
   renameMindmapNode,
 } from "./mindmap-operations";
 import "./app.css";
-import { setNodesCollapsed } from "./folding.mjs";
+import { revealFoldedNode, setNodesCollapsed } from "./folding.mjs";
+import { buildSearchRecords, replaceTextMatches, searchMindmap } from "./search-index.mjs";
 
 const EDITOR_MODE_KEY = "offline-mindmap-editor-mode-v1";
 const SURFACE_MODE_KEY = "offline-mindmap-surface-mode-v1";
@@ -159,6 +161,17 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [replaceValue, setReplaceValue] = useState("");
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchWholeWord, setSearchWholeWord] = useState(false);
+  const [searchDepth, setSearchDepth] = useState("");
+  const [searchVisibility, setSearchVisibility] = useState("all");
+  const [searchTag, setSearchTag] = useState("");
+  const [searchTaskState, setSearchTaskState] = useState("all");
+  const [searchResultIndex, setSearchResultIndex] = useState(0);
+  const [searchRevision, setSearchRevision] = useState(0);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [helpQuery, setHelpQuery] = useState("");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
@@ -327,6 +340,7 @@ export default function App() {
       },
       openPalette: () => setPaletteOpen(true),
       openHelp: () => setHelpOpen(true),
+      openSearch: () => setSearchOpen(true),
       announce,
     };
   }, [announce]);
@@ -342,9 +356,15 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        event.stopPropagation();
+        setSearchOpen(true);
+        return;
+      }
       const api = apiRef.current;
       if (!api) return;
-      const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === "s") {
         event.preventDefault();
         event.stopPropagation();
@@ -352,15 +372,16 @@ export default function App() {
         window.setTimeout(() => void saveLocally(event.shiftKey), 0);
         return;
       }
-      if ((paletteOpen || helpOpen) && event.key === "Escape") {
+      if ((paletteOpen || helpOpen || searchOpen) && event.key === "Escape") {
         event.preventDefault();
         setPaletteOpen(false);
         setHelpOpen(false);
+        setSearchOpen(false);
         return;
       }
       const id = commandForKeyboardEvent(event, api.getAppState());
       if (!id) return;
-      const isGlobal = id === "command-palette" || id === "shortcut-help";
+      const isGlobal = id === "command-palette" || id === "shortcut-help" || id === "search-map";
       if (!isGlobal && !isMindmapSelection(api)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -368,7 +389,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [executeCommand, helpOpen, paletteOpen, saveLocally]);
+  }, [executeCommand, helpOpen, paletteOpen, saveLocally, searchOpen]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -637,6 +658,95 @@ export default function App() {
     ));
   }, [helpQuery]);
 
+  const searchRecords = useMemo(
+    () => buildSearchRecords(activeTabRef.current?.document.scene.elements ?? []),
+    [activeTab, searchRevision],
+  );
+  const searchResults = useMemo(() => searchMindmap(searchRecords, searchQuery, {
+    caseSensitive: searchCaseSensitive,
+    wholeWord: searchWholeWord,
+    depth: searchDepth === "" ? null : Number(searchDepth),
+    visibility: searchVisibility,
+    tag: searchTag,
+    taskState: searchTaskState,
+  }), [searchCaseSensitive, searchDepth, searchQuery, searchRecords, searchTag, searchTaskState, searchVisibility, searchWholeWord]);
+  const currentSearchResult = searchResults.length
+    ? searchResults[Math.min(searchResultIndex, searchResults.length - 1)]
+    : null;
+
+  useEffect(() => {
+    setSearchResultIndex(0);
+  }, [searchQuery, searchCaseSensitive, searchWholeWord, searchDepth, searchVisibility, searchTag, searchTaskState]);
+
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || surfaceModeRef.current !== "whiteboard") return;
+    const ids = searchOpen
+      ? Object.fromEntries(searchResults.filter((result) => !result.hidden).map((result) => [result.elementId, true]))
+      : {};
+    api.updateScene({ appState: { selectedElementIds: ids }, captureUpdate: CaptureUpdateAction.NEVER });
+  }, [searchOpen, searchResults]);
+
+  const navigateSearchResult = useCallback((index: number) => {
+    if (!searchResults.length) return;
+    const nextIndex = (index + searchResults.length) % searchResults.length;
+    const result = searchResults[nextIndex];
+    setSearchResultIndex(nextIndex);
+    setSimpleSelectedNodeId(result.nodeId);
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const revealed = revealFoldedNode(tab.document.scene.elements, result.nodeId) as readonly OrderedExcalidrawElement[];
+    const nextDocument = { ...tab.document, scene: { ...tab.document.scene, elements: revealed } };
+    const nextTab = { ...tab, document: nextDocument };
+    activeTabRef.current = nextTab;
+    setTabs((current) => current.map((item) => item.key === tab.key ? nextTab : item));
+    setSearchRevision((current) => current + 1);
+    const api = apiRef.current;
+    if (surfaceModeRef.current === "whiteboard" && api) {
+      const projected = projectFoldedElements(revealed);
+      const shape = projected.find((element) => element.id === result.elementId);
+      semanticUpdateRef.current = true;
+      api.updateScene({
+        elements: projected,
+        appState: { selectedElementIds: { [result.elementId]: true } },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      semanticUpdateRef.current = false;
+      if (shape) api.scrollToContent([shape], { fitToContent: false, animate: true });
+    } else {
+      window.setTimeout(() => document.querySelector(`[data-node-id="${CSS.escape(result.nodeId)}"]`)?.scrollIntoView({ block: "center" }), 0);
+    }
+  }, [searchResults]);
+
+  const replaceSearchResults = useCallback((replaceAll: boolean) => {
+    const tab = activeTabRef.current;
+    if (!tab || !searchQuery || !searchResults.length) return;
+    const targets = replaceAll ? searchResults : [currentSearchResult].filter(Boolean);
+    const replacements = new Map<string, string>();
+    for (const result of targets) {
+      if (!result) continue;
+      replacements.set(result.nodeId, replaceTextMatches(result.title, searchQuery, replaceValue, {
+        all: replaceAll,
+        caseSensitive: searchCaseSensitive,
+        wholeWord: searchWholeWord,
+      }));
+    }
+    const elements = replaceMindmapNodeTexts(tab.document.scene.elements, replacements);
+    const document = { ...tab.document, updatedAt: new Date().toISOString(), scene: { ...tab.document.scene, elements } };
+    const nextTab = { ...tab, document };
+    activeTabRef.current = nextTab;
+    setTabs((current) => current.map((item) => item.key === tab.key ? nextTab : item));
+    setSearchRevision((current) => current + 1);
+    scheduleRecovery(document);
+    const api = apiRef.current;
+    if (surfaceModeRef.current === "whiteboard" && api) {
+      semanticUpdateRef.current = true;
+      api.updateScene({ elements: projectFoldedElements(elements), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      semanticUpdateRef.current = false;
+    }
+    announce(replaceAll ? `Replaced text in ${replacements.size} nodes. Undo restores the whole change.` : "Replaced the current match.");
+  }, [announce, currentSearchResult, replaceValue, scheduleRecovery, searchCaseSensitive, searchQuery, searchResults, searchWholeWord]);
+
   if (!ready || !activeTab) {
     return (
       <main className="loading-screen">
@@ -681,6 +791,7 @@ export default function App() {
           <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
         </div>
         <div className="mode-actions">
+          <button type="button" onClick={() => setSearchOpen(true)}>Search <kbd>{displayShortcut("Cmd/Ctrl+F")}</kbd></button>
           <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>{displayShortcut("Cmd/Ctrl+K")}</kbd></button>
           <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
         </div>
@@ -757,6 +868,7 @@ export default function App() {
                 <MainMenu.Item onSelect={() => void saveLocally(false)}>Save locally</MainMenu.Item>
                 <MainMenu.Item onSelect={() => void saveLocally(true)}>Save as copy</MainMenu.Item>
                 <MainMenu.Item onSelect={() => setPaletteOpen(true)}>Command palette</MainMenu.Item>
+                <MainMenu.Item onSelect={() => setSearchOpen(true)}>Search and replace map</MainMenu.Item>
                 <MainMenu.Item onSelect={() => setHelpOpen(true)}>Shortcut reference</MainMenu.Item>
                 <MainMenu.Separator />
                 <MainMenu.Item onSelect={() => { window.location.href = "./classic/index.html"; }}>Classic recovery editor</MainMenu.Item>
@@ -805,6 +917,39 @@ export default function App() {
           <input autoFocus aria-label="Search shortcuts" placeholder="Search shortcuts…" value={helpQuery} onChange={(event) => setHelpQuery(event.target.value)} />
           <div>{filteredShortcuts.map((command) => <p key={command.id}><span>{command.label}</span><kbd>{displayShortcut(command.shortcut)}</kbd></p>)}</div>
           <footer>Excalidraw tools: V select · R rectangle · D diamond · O ellipse · A arrow · L line · P freehand · T text · E eraser</footer>
+        </section>
+      </div> : null}
+
+      {searchOpen ? <div className="modal-backdrop search-backdrop" role="presentation" onMouseDown={() => setSearchOpen(false)}>
+        <section className="search-dialog" role="dialog" aria-modal="true" aria-label="Search and replace map" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div><span className="eyebrow">MAP INDEX</span><h2>Search and replace</h2></div>
+            <button type="button" onClick={() => setSearchOpen(false)}>Close</button>
+          </header>
+          <div className="search-primary">
+            <input autoFocus aria-label="Search map" placeholder="Search titles, notes, links and tags…" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+            <span role="status" aria-live="polite">{searchResults.length ? `${Math.min(searchResultIndex + 1, searchResults.length)} of ${searchResults.length}` : "No matches"}</span>
+            <button type="button" disabled={!searchResults.length} onClick={() => navigateSearchResult(searchResultIndex - 1)} aria-label="Previous match">↑</button>
+            <button type="button" disabled={!searchResults.length} onClick={() => navigateSearchResult(searchResultIndex + 1)} aria-label="Next match">↓</button>
+          </div>
+          <div className="search-options">
+            <label><input type="checkbox" checked={searchCaseSensitive} onChange={(event) => setSearchCaseSensitive(event.target.checked)} /> Match case</label>
+            <label><input type="checkbox" checked={searchWholeWord} onChange={(event) => setSearchWholeWord(event.target.checked)} /> Whole word</label>
+            <label>Depth <input type="number" min="0" placeholder="Any" value={searchDepth} onChange={(event) => setSearchDepth(event.target.value)} /></label>
+            <label>Visibility <select value={searchVisibility} onChange={(event) => setSearchVisibility(event.target.value)}><option value="all">All nodes</option><option value="visible">Visible only</option><option value="hidden">Collapsed only</option></select></label>
+            <label>Tag <input placeholder="Any tag" value={searchTag} onChange={(event) => setSearchTag(event.target.value)} /></label>
+            <label>Task <select value={searchTaskState} onChange={(event) => setSearchTaskState(event.target.value)}><option value="all">Any task state</option><option value="none">Not a task</option><option value="open">Open</option><option value="done">Done</option></select></label>
+          </div>
+          <div className="search-result-list" aria-label="Search results">
+            {searchResults.slice(0, 100).map((result, index) => <button type="button" className={index === searchResultIndex ? "active" : ""} key={result.nodeId} onClick={() => navigateSearchResult(index)}><span>{result.title}<small>Depth {result.depth}{result.hidden ? " · Hidden in collapsed branch" : ""}</small></span><b>{result.hidden ? "Reveal" : "Go"}</b></button>)}
+            {searchResults.length > 100 ? <p>Showing the first 100 of {searchResults.length} matches. Next and previous still navigate every result.</p> : null}
+          </div>
+          <div className="replace-row">
+            <input aria-label="Replacement text" placeholder="Replace title text with…" value={replaceValue} onChange={(event) => setReplaceValue(event.target.value)} />
+            <button type="button" disabled={!currentSearchResult} onClick={() => replaceSearchResults(false)}>Replace</button>
+            <button type="button" className="primary-action" disabled={!searchResults.length} onClick={() => replaceSearchResults(true)}>Replace all</button>
+          </div>
+          <footer>Search never changes the map. Replacement only runs when you confirm it; Replace all is a single undo step.</footer>
         </section>
       </div> : null}
 

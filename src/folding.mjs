@@ -32,18 +32,37 @@ export function foldingIndex(elements) {
   }
   const hiddenNodeIds = new Set();
   const hiddenDescendantCount = new Map();
-  for (const node of nodes.values()) {
-    let cursor = node.parentNodeId;
+  const collapsedAncestor = new Map();
+  const resolveCollapsedAncestor = (startNodeId) => {
+    if (!startNodeId || !nodes.has(startNodeId)) return null;
+    if (collapsedAncestor.has(startNodeId)) return collapsedAncestor.get(startNodeId);
+    const path = [];
     const visited = new Set();
+    let cursor = startNodeId;
+    let found = null;
     while (cursor && nodes.has(cursor) && !visited.has(cursor)) {
-      visited.add(cursor);
-      const ancestor = nodes.get(cursor);
-      if (ancestor.collapsed) {
-        hiddenNodeIds.add(node.nodeId);
-        hiddenDescendantCount.set(cursor, (hiddenDescendantCount.get(cursor) ?? 0) + 1);
+      if (collapsedAncestor.has(cursor)) {
+        found = collapsedAncestor.get(cursor);
         break;
       }
-      cursor = ancestor.parentNodeId;
+      visited.add(cursor);
+      const current = nodes.get(cursor);
+      if (current.collapsed) {
+        found = cursor;
+        collapsedAncestor.set(cursor, cursor);
+        break;
+      }
+      path.push(cursor);
+      cursor = current.parentNodeId;
+    }
+    for (let index = path.length - 1; index >= 0; index -= 1) collapsedAncestor.set(path[index], found);
+    return found;
+  };
+  for (const node of nodes.values()) {
+    const ancestorId = resolveCollapsedAncestor(node.parentNodeId);
+    if (ancestorId) {
+      hiddenNodeIds.add(node.nodeId);
+      hiddenDescendantCount.set(ancestorId, (hiddenDescendantCount.get(ancestorId) ?? 0) + 1);
     }
   }
   return { nodes, shapeByNodeId, children, hiddenNodeIds, hiddenDescendantCount };
@@ -112,18 +131,39 @@ export function setNodesCollapsed(elements, nodeIds, collapsed) {
   });
 }
 
+/** Expand every collapsed ancestor needed to make one node visible. @param {readonly any[]} elements @param {string} nodeId */
+export function revealFoldedNode(elements, nodeId) {
+  const { nodes } = foldingIndex(elements);
+  const ancestors = [];
+  const visited = new Set([nodeId]);
+  let cursor = nodes.get(nodeId)?.parentNodeId;
+  while (cursor && nodes.has(cursor) && !visited.has(cursor)) {
+    visited.add(cursor);
+    ancestors.push(cursor);
+    cursor = nodes.get(cursor)?.parentNodeId;
+  }
+  return setNodesCollapsed(elements, ancestors, false);
+}
+
 /** @param {readonly any[]} elements */
 export function nodeDepths(elements) {
   const { nodes } = foldingIndex(elements);
   const depths = new Map();
   for (const nodeId of nodes.keys()) {
-    let depth = 0;
+    if (depths.has(nodeId)) continue;
+    const path = [];
     let cursor = nodes.get(nodeId)?.parentNodeId;
     const visited = new Set([nodeId]);
     while (cursor && nodes.has(cursor) && !visited.has(cursor)) {
+      if (depths.has(cursor)) break;
       visited.add(cursor);
-      depth += 1;
+      path.push(cursor);
       cursor = nodes.get(cursor)?.parentNodeId;
+    }
+    let depth = cursor && depths.has(cursor) ? depths.get(cursor) + 1 : 0;
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      depths.set(path[index], depth);
+      depth += 1;
     }
     depths.set(nodeId, depth);
   }

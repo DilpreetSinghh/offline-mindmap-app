@@ -17,6 +17,8 @@ test("maps navigation, child, sibling and help shortcuts", () => {
   assert.equal(routeMindmapShortcut({ key: "Tab" }), "new-child");
   assert.equal(routeMindmapShortcut({ key: "Enter" }), "new-sibling");
   assert.equal(routeMindmapShortcut({ key: "?", shiftKey: true }), "shortcut-help");
+  assert.equal(routeMindmapShortcut({ key: "f", metaKey: true }), "search-map");
+  assert.equal(routeMindmapShortcut({ key: "F", ctrlKey: true }), "search-map");
 });
 
 test("does not intercept editing, form controls or browser modifier combinations", () => {

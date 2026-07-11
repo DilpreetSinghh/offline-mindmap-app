@@ -100,6 +100,28 @@ export function renameMindmapNode(
   });
 }
 
+export function replaceMindmapNodeTexts(
+  elements: readonly OrderedExcalidrawElement[],
+  replacements: ReadonlyMap<string, string>,
+): OrderedExcalidrawElement[] {
+  if (!replacements.size) return [...elements];
+  const editable = ensureEditableMindmapElements(elements);
+  const nodeIdByShapeId = new Map(
+    editable.flatMap((element) => {
+      const node = getMindmapNode(element);
+      return node ? [[element.id, node.nodeId] as const] : [];
+    }),
+  );
+  return editable.map((element) => {
+    if (element.type !== "text" || !element.containerId) return element;
+    const nodeId = nodeIdByShapeId.get(element.containerId);
+    const replacement = nodeId ? replacements.get(nodeId) : undefined;
+    if (replacement === undefined) return element;
+    const text = replacement.trim() || "Untitled node";
+    return newElementWith(element, { text, originalText: text, locked: false }) as OrderedExcalidrawElement;
+  });
+}
+
 export function reflowMindmapElements(
   elements: readonly OrderedExcalidrawElement[],
   requestedRootNodeId?: string,

@@ -51,7 +51,8 @@ export type CommandId =
   | "reflow-map"
   | "add-relationship"
   | "command-palette"
-  | "shortcut-help";
+  | "shortcut-help"
+  | "search-map";
 
 export type CommandContext = {
   api: ExcalidrawImperativeAPI;
@@ -60,6 +61,7 @@ export type CommandContext = {
   stageCanonicalElements: (elements: readonly OrderedExcalidrawElement[]) => void;
   openPalette: () => void;
   openHelp: () => void;
+  openSearch: () => void;
   announce: (message: string, state?: "saved" | "error") => void;
 };
 
@@ -619,6 +621,7 @@ export const commandRegistry: readonly Command[] = [
   { id: "add-relationship", label: "Connect selected nodes as a relationship", shortcut: "", keywords: "arrow cross connection", execute: addRelationship },
   { id: "command-palette", label: "Open command palette", shortcut: "Cmd/Ctrl+K", keywords: "search commands", execute: (c) => c.openPalette() },
   { id: "shortcut-help", label: "Open shortcut reference", shortcut: "?", keywords: "help keyboard", execute: (c) => c.openHelp() },
+  { id: "search-map", label: "Search and replace map", shortcut: "Cmd/Ctrl+F", keywords: "find replace filter jump node", execute: (c) => c.openSearch() },
 ];
 
 export function findCommand(id: CommandId): Command {
