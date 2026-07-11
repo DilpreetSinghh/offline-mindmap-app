@@ -1,0 +1,26 @@
+{
+  "name": "offline-mindmap-app",
+  "version": "3.0.0-beta.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.cjs tests/*.test.mjs && node tests/static-checks.mjs"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vite": "8.1.4"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-darwin-arm64": "1.1.5",
+    "@rolldown/binding-linux-x64-gnu": "1.1.5"
+  }
+}

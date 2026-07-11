@@ -1,14 +1,36 @@
 # Offline Mind Map App
 
-A fully offline, client-side mind-map web application that runs entirely in the browser. It stores maps locally (in `localStorage`) and never sends your data to a server.
+A fully offline, client-side mind-map and whiteboard application. The `public-beta` build uses Excalidraw core, React, TypeScript and IndexedDB while retaining the original canvas editor as a classic recovery route. It never sends map data to a server.
 
-The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas around, drop sticky-style nodes, and build branches using directional handles around each node.
+The beta combines a keyboard-fast semantic mind-map layer with Excalidraw's general whiteboard tools. The classic canvas UI remains available at `classic/index.html` for one recovery deployment.
+
+## Public beta editor
+
+- **Excalidraw whiteboard**
+  - Rectangle, ellipse, diamond, text, image, line, arrow, freehand, eraser and frame tools.
+  - Marquee and multi-selection, resize, rotate, align, distribute, groups, layers, locking, snapping, grid and zoom.
+  - Local libraries and image files are persisted in IndexedDB; production fonts and editor assets are bundled locally.
+- **Semantic mind maps**
+  - Mind-map node and hierarchy metadata live in Excalidraw element `customData`.
+  - Tab/Enter create child and sibling nodes; Cmd/Ctrl+Arrow creates a bound node in a direction.
+  - Plain arrows navigate to the nearest visible mind-map node.
+  - Subtree copy, cut, paste, duplication and deletion share one command registry with the toolbar, context menu and searchable command palette.
+  - Hierarchy arrows reject cycles; relationship arrows allow cycles and never change hierarchy.
+- **Local persistence**
+  - Named schema-3 documents and binary assets are stored in IndexedDB.
+  - Autosave writes a separate validated workspace-recovery snapshot.
+  - First launch migrates schema-2 saved maps and open tabs, reads the result back, compares counts/hierarchy and retains the schema-2 localStorage copy.
+  - **Save locally** asks for a name only on first save; **Save as copy** creates a new ID.
+- **Export and recovery**
+  - PNG, SVG, PDF, clipboard and native Excalidraw JSON exports.
+  - Native schema-3 backup/restore includes binary files and validates the complete backup before an atomic database write.
+  - The classic editor and schema-2 JSON backup remain available for recovery.
 
 ## Key features
 
 - **Runs completely offline**
-  - Pure HTML/CSS/JavaScript bundle – no Node backend, no server calls.
-  - All data is kept in browser memory and `localStorage`; there is no telemetry, analytics, or account system.
+  - Static Vite bundle – no backend, account, telemetry or map-data network calls.
+  - Documents and assets use IndexedDB; schema-2 recovery remains in `localStorage`.
 
 - **Tabbed workspace**
   - Open multiple maps at once using a tab bar at the top of the canvas.
@@ -16,7 +38,7 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
   - Tabs are named on first explicit save and can be closed individually.
 
 - **Local map storage**
-  - Maps are stored under a single key in `localStorage` (`offline-mindmap-maps-v1`).[cite:168]
+  - Beta maps are schema-3 documents in IndexedDB; classic maps remain under `offline-mindmap-maps-v1` for recovery.
   - The toolbar offers:
     - **New tab** – start a fresh map in a new tab.
     - **Save locally** – prompt once for a name, then silently update that named map.
@@ -91,6 +113,21 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
 
 ## Architecture overview
 
+- **src/App.tsx**
+  - React application shell, tabs, named local maps, command palette, keyboard routing, save/backup/restore and Excalidraw integration.
+
+- **src/document.ts**
+  - DocumentV3 creation and validation, schema-2 conversion, canonical mind-map metadata, bound-arrow construction and cycle-safe retargeting.
+
+- **src/db.ts**
+  - IndexedDB documents, binary assets, local libraries, recovery snapshots and verified migration.
+
+- **src/commands.ts**
+  - Single transaction-oriented command registry used by mind-map buttons, shortcuts, context menu and command palette.
+
+- **classic/index.html**, **app.js**, **storage.js**, **hierarchy.js**
+  - The original schema-2 canvas editor retained as a recovery route.
+
 - **index.html**
   - Defines the SPA chrome: toolbar, tab bar, left Settings panel, central canvas, and right Export panel.[cite:167]
   - Loads the vendored `pdf-lib` browser bundle for offline PDF generation and the app script (`app.js`).
@@ -124,28 +161,28 @@ The UI is inspired by tools like Apple Freeform and Miro: you drag a canvas arou
    cd offline-mindmap-app
    ```
 
-2. Open `index.html` directly in a modern browser **or** serve the folder with a simple static server:
+2. Install the exact locked dependencies and start Vite:
 
    ```bash
-   python -m http.server 8000
+   npm install
+   npm run dev
    ```
 
-3. Navigate to `http://localhost:8000` (or the port you chose) and start sketching mind maps.
+3. Open the local URL printed by Vite. Use `npm run build` to create the production `dist/` bundle.
 
 All maps stay inside your browser storage. There is no telemetry, analytics, or server-side processing.
 
 ## Publishing
 
-This repository is designed to be deployed as a static site (no backend). Common options:
+This repository is deployed as a static Vite site with no backend.
 
 - **GitHub Pages**
   - In GitHub, go to **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**.
-  - Pushes to `public-beta` run `.github/workflows/deploy-pages.yml` and publish that exact branch.
+  - Pushes to `public-beta` install the locked dependencies, run TypeScript and Vite builds, and publish `dist/`.
   - The deployed `index.html` includes a `source-commit` meta tag containing the source commit SHA for smoke-test verification.
 
 - **Other static hosts** (Netlify, Vercel, Cloudflare Pages, etc.)
-  - Connect this repo and configure it as a static site with `index.html` as the entry point.
-  - No build step is required – just serve the files as they are.
+  - Build with `npm run build` and serve the generated `dist/` directory.
 
 ## Roadmap ideas
 
@@ -153,7 +190,7 @@ Some ideas that could be explored on top of the current foundation:
 
 - More advanced automatic layouts (force-directed, orthogonal tree, mind-map style left/right balancing).
 - Inline icons / emojis inside nodes.
-- Optional IndexedDB persistence for larger maps.
+- PWA packaging, the 10,000-node benchmark and the complete accessibility audit are tracked in issues #23 and #24.
 
 ## License
 
@@ -162,3 +199,5 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 ## Third‑party libraries
 
 - [pdf-lib](https://github.com/Hopding/pdf-lib) 1.17.1 — vendored for offline client-side PDF generation. Its MIT licence is preserved in [`vendor/pdf-lib.LICENSE.md`](vendor/pdf-lib.LICENSE.md).
+- [Excalidraw](https://github.com/excalidraw/excalidraw) 0.18.1 — MIT-licensed editor core. No source from the AGPL Obsidian Excalidraw plugin is included.
+- React and React DOM 19.2.7; Vite 8.1.4.

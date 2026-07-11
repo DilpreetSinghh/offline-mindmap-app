@@ -1,0 +1,556 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CaptureUpdateAction,
+  DefaultSidebar,
+  Excalidraw,
+  MainMenu,
+} from "@excalidraw/excalidraw";
+import "@excalidraw/excalidraw/index.css";
+import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
+import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import { commandForKeyboardEvent, commandRegistry, findCommand, type CommandContext, type CommandId } from "./commands";
+import {
+  assertValidDocument,
+  createBlankDocument,
+  createId,
+  getMindmapNode,
+  normaliseConnectionBindings,
+  validateDocument,
+} from "./document";
+import {
+  getLibrary,
+  getRecoveryDocument,
+  listDocuments,
+  migrateLegacyDocuments,
+  putDocument,
+  putDocuments,
+  putLibrary,
+  putRecoveryDocument,
+} from "./db";
+import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
+import type { DocumentV3, EditorTab } from "./types";
+import "./app.css";
+
+const EDITOR_MODE_KEY = "offline-mindmap-editor-mode-v1";
+const AUTOSAVE_DELAY = 600;
+
+type Status = { message: string; state: "" | "saved" | "error" };
+type ContextMenuState = { x: number; y: number } | null;
+
+function formatTime(date = new Date()): string {
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function isMindmapSelection(api: ExcalidrawImperativeAPI): boolean {
+  const selected = api.getAppState().selectedElementIds;
+  return api.getSceneElements().some((element) => selected[element.id] && getMindmapNode(element));
+}
+
+function currentSceneDocument(tab: EditorTab, api: ExcalidrawImperativeAPI): DocumentV3 {
+  return {
+    ...tab.document,
+    updatedAt: new Date().toISOString(),
+    scene: {
+      elements: api.getSceneElements(),
+      appState: api.getAppState(),
+      files: api.getFiles(),
+    },
+  };
+}
+
+export default function App() {
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const tabsRef = useRef<EditorTab[]>([]);
+  const activeKeyRef = useRef("");
+  const recoveryTimerRef = useRef<number | null>(null);
+  const explicitStatusUntilRef = useRef(0);
+  const lastValidElementsRef = useRef<readonly OrderedExcalidrawElement[]>([]);
+  const semanticUpdateRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const nameResolverRef = useRef<((value: string | null) => void) | null>(null);
+
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeKey, setActiveKey] = useState("");
+  const [savedDocuments, setSavedDocuments] = useState<DocumentV3[]>([]);
+  const [status, setStatus] = useState<Status>({ message: "Opening local workspace…", state: "" });
+  const [ready, setReady] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
+  const [nameRequest, setNameRequest] = useState<{ copy: boolean; value: string } | null>(null);
+
+  tabsRef.current = tabs;
+  activeKeyRef.current = activeKey;
+
+  const activeTab = useMemo(() => tabs.find((tab) => tab.key === activeKey) ?? null, [activeKey, tabs]);
+  const activeTabRef = useRef<EditorTab | null>(null);
+  activeTabRef.current = activeTab;
+
+  const announce = useCallback((message: string, state: "saved" | "error" = "saved") => {
+    setStatus({ message, state });
+  }, []);
+
+  const refreshSavedDocuments = useCallback(async () => {
+    setSavedDocuments(await listDocuments());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        localStorage.setItem(EDITOR_MODE_KEY, "excalidraw");
+        const migration = await migrateLegacyDocuments();
+        const [documents, recovery, library] = await Promise.all([listDocuments(), getRecoveryDocument(), getLibrary()]);
+        if (cancelled) return;
+        setSavedDocuments(documents);
+        const initialDocument = recovery && validateDocument(recovery).valid ? recovery : documents[0] ?? createBlankDocument();
+        const persisted = documents.some((document) => document.id === initialDocument.id);
+        const initialTab = { key: createId("tab"), document: initialDocument, persisted };
+        setTabs([initialTab]);
+        setActiveKey(initialTab.key);
+        lastValidElementsRef.current = initialDocument.scene.elements;
+        if (library && apiRef.current) await apiRef.current.updateLibrary({ libraryItems: library as LibraryItems });
+        if (migration.errors.length) {
+          announce(`Migration paused: ${migration.errors[0]}`, "error");
+        } else if (migration.migrated.length) {
+          announce(`Migrated ${migration.migrated.length} classic map(s); schema-2 recovery retained.`);
+        } else {
+          announce("Local whiteboard ready.");
+        }
+        setReady(true);
+      } catch (error) {
+        if (!cancelled) {
+          announce(`Local database failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+          const fallback = { key: createId("tab"), document: createBlankDocument(), persisted: false };
+          setTabs([fallback]);
+          setActiveKey(fallback.key);
+          setReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [announce]);
+
+  const captureActiveTab = useCallback((): EditorTab | null => {
+    const api = apiRef.current;
+    const tab = activeTabRef.current;
+    if (!api || !tab) return null;
+    return { ...tab, document: currentSceneDocument(tab, api) };
+  }, []);
+
+  const updateCapturedTab = useCallback((captured: EditorTab) => {
+    setTabs((current) => current.map((tab) => (tab.key === captured.key ? captured : tab)));
+  }, []);
+
+  const requestMapName = useCallback((copy: boolean, value: string) => new Promise<string | null>((resolve) => {
+    nameResolverRef.current = resolve;
+    setNameRequest({ copy, value });
+  }), []);
+
+  const resolveMapName = useCallback((value: string | null) => {
+    nameResolverRef.current?.(value);
+    nameResolverRef.current = null;
+    setNameRequest(null);
+  }, []);
+
+  const saveLocally = useCallback(
+    async (saveAsCopy = false) => {
+      if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+      const captured = captureActiveTab();
+      if (!captured) return;
+      let name = captured.document.name;
+      if (saveAsCopy || !captured.persisted) {
+        const requested = await requestMapName(saveAsCopy, name);
+        if (requested === null) {
+          setStatus({ message: "Local save cancelled.", state: "" });
+          return;
+        }
+        name = requested.trim() || name;
+      }
+      const now = new Date().toISOString();
+      const document: DocumentV3 = {
+        ...captured.document,
+        id: saveAsCopy || !captured.persisted ? createId("map") : captured.document.id,
+        name,
+        createdAt: saveAsCopy || !captured.persisted ? now : captured.document.createdAt,
+        updatedAt: now,
+      };
+      try {
+        assertValidDocument(document);
+        const saved = await putDocument(document);
+        if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+        const nextTab = { ...captured, document: saved, persisted: true };
+        activeTabRef.current = nextTab;
+        updateCapturedTab(nextTab);
+        await putRecoveryDocument(saved);
+        await refreshSavedDocuments();
+        explicitStatusUntilRef.current = Date.now() + 3_000;
+        announce(`Saved locally · ${formatTime()}`);
+      } catch (error) {
+        announce(`Local save failed; previous valid copy preserved: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    },
+    [announce, captureActiveTab, refreshSavedDocuments, requestMapName, updateCapturedTab],
+  );
+
+  const commandContext = useCallback((): CommandContext | null => {
+    if (!apiRef.current) return null;
+    return {
+      api: apiRef.current,
+      openPalette: () => setPaletteOpen(true),
+      openHelp: () => setHelpOpen(true),
+      announce,
+    };
+  }, [announce]);
+
+  const executeCommand = useCallback(
+    (id: CommandId) => {
+      const context = commandContext();
+      if (!context) return;
+      setContextMenu(null);
+      void findCommand(id).execute(context);
+    },
+    [commandContext],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        window.setTimeout(() => void saveLocally(event.shiftKey), 0);
+        return;
+      }
+      if ((paletteOpen || helpOpen) && event.key === "Escape") {
+        event.preventDefault();
+        setPaletteOpen(false);
+        setHelpOpen(false);
+        return;
+      }
+      const id = commandForKeyboardEvent(event, api.getAppState());
+      if (!id) return;
+      const isGlobal = id === "command-palette" || id === "shortcut-help";
+      if (!isGlobal && !isMindmapSelection(api)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      executeCommand(id);
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [executeCommand, helpOpen, paletteOpen, saveLocally]);
+
+  const scheduleRecovery = useCallback(
+    (document: DocumentV3) => {
+      if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = window.setTimeout(() => {
+        void putRecoveryDocument(document)
+          .then(() => setStatus((current) => (
+            current.state === "error" || Date.now() < explicitStatusUntilRef.current
+              ? current
+              : { message: `Recovery saved · ${formatTime()}`, state: "" }
+          )))
+          .catch((error) => announce(`Recovery save failed; previous snapshot preserved: ${error.message}`, "error"));
+      }, AUTOSAVE_DELAY);
+    },
+    [announce],
+  );
+
+  const onSceneChange = useCallback(
+    (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+      const tab = activeTabRef.current;
+      const api = apiRef.current;
+      if (!tab || !api || semanticUpdateRef.current) return;
+      const normalised = normaliseConnectionBindings(elements);
+      if (normalised.errors.length) {
+        semanticUpdateRef.current = true;
+        api.updateScene({ elements: lastValidElementsRef.current, captureUpdate: CaptureUpdateAction.NEVER });
+        semanticUpdateRef.current = false;
+        announce(normalised.errors[0], "error");
+        return;
+      }
+      const document: DocumentV3 = {
+        ...tab.document,
+        updatedAt: new Date().toISOString(),
+        scene: { elements: normalised.elements, appState, files },
+      };
+      const validation = validateDocument(document);
+      if (!validation.valid) {
+        semanticUpdateRef.current = true;
+        api.updateScene({ elements: lastValidElementsRef.current, captureUpdate: CaptureUpdateAction.NEVER });
+        semanticUpdateRef.current = false;
+        announce(validation.errors[0], "error");
+        return;
+      }
+      lastValidElementsRef.current = normalised.elements;
+      if (normalised.changed) {
+        semanticUpdateRef.current = true;
+        api.updateScene({ elements: normalised.elements, captureUpdate: CaptureUpdateAction.NEVER });
+        semanticUpdateRef.current = false;
+      }
+      activeTabRef.current = { ...tab, document };
+      scheduleRecovery(document);
+    },
+    [announce, scheduleRecovery],
+  );
+
+  const openDocument = useCallback(
+    (id: string) => {
+      const document = savedDocuments.find((item) => item.id === id);
+      if (!document) return;
+      const captured = captureActiveTab();
+      if (captured) updateCapturedTab(captured);
+      const existing = tabsRef.current.find((tab) => tab.document.id === id && tab.persisted);
+      if (existing) {
+        setActiveKey(existing.key);
+        return;
+      }
+      const tab = { key: createId("tab"), document, persisted: true };
+      setTabs((current) => [...current, tab]);
+      setActiveKey(tab.key);
+      lastValidElementsRef.current = document.scene.elements;
+    },
+    [captureActiveTab, savedDocuments, updateCapturedTab],
+  );
+
+  const newTab = useCallback(() => {
+    const captured = captureActiveTab();
+    if (captured) updateCapturedTab(captured);
+    const tab = { key: createId("tab"), document: createBlankDocument(`Untitled ${tabsRef.current.length + 1}`), persisted: false };
+    setTabs((current) => [...current, tab]);
+    setActiveKey(tab.key);
+    lastValidElementsRef.current = tab.document.scene.elements;
+  }, [captureActiveTab, updateCapturedTab]);
+
+  const closeTab = useCallback(
+    (key: string) => {
+      setTabs((current) => {
+        if (current.length === 1) return current;
+        const index = current.findIndex((tab) => tab.key === key);
+        const next = current.filter((tab) => tab.key !== key);
+        if (key === activeKeyRef.current) setActiveKey(next[Math.max(0, index - 1)].key);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const runExport = useCallback(async () => {
+    const api = apiRef.current;
+    const tab = activeTabRef.current;
+    if (!api || !tab) return;
+    try {
+      await exportScene(api, tab.document.name, exportFormat);
+      announce(exportFormat === "clipboard" ? "Canvas copied to clipboard." : `${exportFormat.toUpperCase()} export created.`);
+    } catch (error) {
+      announce(`Export failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  }, [announce, exportFormat]);
+
+  const backupAll = useCallback(async () => {
+    const captured = captureActiveTab();
+    const documents = await listDocuments();
+    if (captured && !documents.some((item) => item.id === captured.document.id)) documents.push(captured.document);
+    downloadNativeBackup(documents);
+    announce("Native JSON backup downloaded.");
+  }, [announce, captureActiveTab]);
+
+  const restoreBackup = useCallback(
+    async (file: File) => {
+      try {
+        if (file.size > 50 * 1024 * 1024) throw new Error("Backup exceeds the 50 MB local limit.");
+        const parsed = JSON.parse(await file.text()) as { format?: string; schemaVersion?: number; documents?: DocumentV3[] };
+        if (parsed.format !== "offline-mindmap-native-backup" || parsed.schemaVersion !== 3 || !Array.isArray(parsed.documents)) {
+          throw new Error("Unsupported native backup format.");
+        }
+        for (const document of parsed.documents) assertValidDocument(document);
+        await putDocuments(parsed.documents);
+        await refreshSavedDocuments();
+        announce(`Restored ${parsed.documents.length} map(s) from native backup.`);
+      } catch (error) {
+        announce(`Restore failed; existing maps were preserved: ${error instanceof Error ? error.message : String(error)}`, "error");
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [announce, refreshSavedDocuments],
+  );
+
+  const filteredCommands = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    return commandRegistry.filter((command) => !query || `${command.label} ${command.keywords} ${command.shortcut}`.toLowerCase().includes(query));
+  }, [paletteQuery]);
+
+  if (!ready || !activeTab) {
+    return (
+      <main className="loading-screen">
+        <div className="loading-mark">M</div>
+        <p>{status.message}</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell" onContextMenu={(event) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".workspace")) return;
+      event.preventDefault();
+      setContextMenu({ x: event.clientX, y: event.clientY });
+    }}>
+      <header className="topbar">
+        <div className="brand-block">
+          <span className="brand-mark">M</span>
+          <div><strong>Offline Mind Map</strong><small>Excalidraw whiteboard beta</small></div>
+        </div>
+        <div className="toolbar-actions" aria-label="Map actions">
+          <button type="button" onClick={newTab}>New tab</button>
+          <select aria-label="Saved local maps" value="" onChange={(event) => openDocument(event.target.value)}>
+            <option value="">Open local map…</option>
+            {savedDocuments.map((document) => <option key={document.id} value={document.id}>{document.name}</option>)}
+          </select>
+          <button type="button" className="primary-action" onClick={() => void saveLocally(false)}>Save locally</button>
+          <button type="button" onClick={() => void saveLocally(true)}>Save as copy</button>
+          <button type="button" onClick={() => void backupAll()}>Backup JSON</button>
+          <button type="button" onClick={() => fileInputRef.current?.click()}>Restore JSON</button>
+          <input ref={fileInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void restoreBackup(file);
+          }} />
+        </div>
+        <div className="mode-actions">
+          <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>⌘K</kbd></button>
+          <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
+        </div>
+      </header>
+
+      <nav className="tab-strip" aria-label="Open maps">
+        {tabs.map((tab) => (
+          <button type="button" key={tab.key} className={tab.key === activeKey ? "tab active" : "tab"} onClick={() => {
+            const captured = captureActiveTab();
+            if (captured) updateCapturedTab(captured);
+            setActiveKey(tab.key);
+            lastValidElementsRef.current = tab.document.scene.elements;
+          }}>
+            <span>{tab.document.name}</span>{!tab.persisted ? <i>Draft</i> : null}
+            {tabs.length > 1 ? <b role="button" aria-label={`Close ${tab.document.name}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }}>×</b> : null}
+          </button>
+        ))}
+        <span className={`status ${status.state}`} role="status" aria-live="polite">{status.message}</span>
+      </nav>
+
+      <section className="workspace">
+        <aside className="mindmap-rail" aria-label="Mind-map tools">
+          <div className="rail-heading"><span>Mind-map mode</span><button type="button" onClick={() => setHelpOpen(true)} aria-label="Shortcut help">?</button></div>
+          <button type="button" onClick={() => executeCommand("new-child")}><strong>Child node</strong><kbd>Tab</kbd></button>
+          <button type="button" onClick={() => executeCommand("new-sibling")}><strong>Sibling node</strong><kbd>Enter</kbd></button>
+          <button type="button" onClick={() => executeCommand("add-relationship")}><strong>Relationship</strong><span>2 selected</span></button>
+          <button type="button" onClick={() => executeCommand("duplicate-subtree")}><strong>Duplicate branch</strong><kbd>⌘D</kbd></button>
+          <button type="button" onClick={() => executeCommand("delete-subtree")}><strong>Delete branch</strong><kbd>Del</kbd></button>
+          <div className="rail-note"><b>Fast mapping</b><p>Use Cmd/Ctrl + arrow to grow in a direction. Plain arrows move selection.</p></div>
+        </aside>
+
+        <div className="canvas-stage" onClick={() => setContextMenu(null)}>
+          <Excalidraw
+            key={activeTab.key}
+            excalidrawAPI={(api) => {
+              apiRef.current = api;
+              lastValidElementsRef.current = activeTab.document.scene.elements;
+              void getLibrary().then((library) => library && api.updateLibrary({ libraryItems: library as LibraryItems }));
+            }}
+            initialData={{
+              elements: activeTab.document.scene.elements,
+              appState: { ...activeTab.document.scene.appState, name: activeTab.document.name },
+              files: activeTab.document.scene.files,
+              scrollToContent: false,
+            }}
+            onChange={onSceneChange}
+            onLibraryChange={(items) => putLibrary(items)}
+            autoFocus
+            handleKeyboardGlobally
+            gridModeEnabled={Boolean(activeTab.document.scene.appState.gridSize)}
+            objectsSnapModeEnabled
+            aiEnabled={false}
+            UIOptions={{
+              canvasActions: {
+                saveToActiveFile: false,
+                loadScene: false,
+                export: false,
+                saveAsImage: false,
+                toggleTheme: true,
+                clearCanvas: true,
+              },
+              tools: { image: true },
+            }}
+          >
+            <MainMenu>
+              <MainMenu.DefaultItems.ToggleTheme />
+              <MainMenu.DefaultItems.ChangeCanvasBackground />
+              <MainMenu.DefaultItems.ClearCanvas />
+              <MainMenu.Separator />
+              <MainMenu.Item onSelect={() => void saveLocally(false)}>Save locally</MainMenu.Item>
+              <MainMenu.Item onSelect={() => void saveLocally(true)}>Save as copy</MainMenu.Item>
+              <MainMenu.Item onSelect={() => setPaletteOpen(true)}>Command palette</MainMenu.Item>
+              <MainMenu.Item onSelect={() => setHelpOpen(true)}>Shortcut reference</MainMenu.Item>
+              <MainMenu.Separator />
+              <MainMenu.Item onSelect={() => { window.location.href = "./classic/index.html"; }}>Classic recovery editor</MainMenu.Item>
+            </MainMenu>
+            <DefaultSidebar />
+          </Excalidraw>
+        </div>
+
+        <aside className="export-rail" aria-label="Export tools">
+          <div><span className="eyebrow">LOCAL EXPORT</span><h2>Take it with you</h2><p>Images, native files and backups are generated entirely on this device.</p></div>
+          <label>Format<select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
+            <option value="png">PNG image</option><option value="svg">SVG vector</option><option value="pdf">PDF document</option>
+            <option value="excalidraw">Native Excalidraw JSON</option><option value="clipboard">Copy PNG to clipboard</option>
+          </select></label>
+          <button type="button" className="export-button" onClick={() => void runExport()}>Export {exportFormat === "clipboard" ? "to clipboard" : exportFormat.toUpperCase()}</button>
+          <div className="privacy-card"><span>●</span><div><strong>Private by design</strong><p>No cloud, telemetry or CDN requests.</p></div></div>
+          <small>Build {__SOURCE_SHA__.slice(0, 8)}</small>
+        </aside>
+      </section>
+
+      {paletteOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setPaletteOpen(false)}>
+        <section className="command-dialog" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
+          <input autoFocus placeholder="Search commands…" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} />
+          <div className="command-list">{filteredCommands.map((command) => <button type="button" key={command.id} onClick={() => { executeCommand(command.id); setPaletteOpen(false); }}><span>{command.label}<small>{command.keywords}</small></span><kbd>{command.shortcut}</kbd></button>)}</div>
+        </section>
+      </div> : null}
+
+      {helpOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setHelpOpen(false)}>
+        <section className="shortcut-dialog" role="dialog" aria-modal="true" aria-label="Shortcut reference" onMouseDown={(event) => event.stopPropagation()}>
+          <header><div><span className="eyebrow">KEYBOARD-FIRST</span><h2>Shortcut reference</h2></div><button type="button" onClick={() => setHelpOpen(false)}>Close</button></header>
+          <div>{commandRegistry.filter((command) => command.shortcut).map((command) => <p key={command.id}><span>{command.label}</span><kbd>{command.shortcut}</kbd></p>)}</div>
+          <footer>Excalidraw tools: V select · R rectangle · D diamond · O ellipse · A arrow · L line · P freehand · T text · E eraser</footer>
+        </section>
+      </div> : null}
+
+      {contextMenu ? <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
+        {(["new-child", "new-sibling", "duplicate-subtree", "delete-subtree", "add-relationship", "command-palette"] as CommandId[]).map((id) => {
+          const command = findCommand(id);
+          return <button type="button" role="menuitem" key={id} onClick={() => executeCommand(id)}><span>{command.label}</span><kbd>{command.shortcut}</kbd></button>;
+        })}
+      </div> : null}
+
+      {nameRequest ? <div className="modal-backdrop" role="presentation">
+        <form className="name-dialog" role="dialog" aria-modal="true" aria-label={nameRequest.copy ? "Save copy as" : "Save map locally"} onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          resolveMapName(String(data.get("mapName") || "").trim() || nameRequest.value);
+        }}>
+          <span className="eyebrow">LOCAL ONLY</span>
+          <h2>{nameRequest.copy ? "Name this copy" : "Name this map"}</h2>
+          <p>{nameRequest.copy ? "A separate map ID will be created." : "You will only be asked on the first save."}</p>
+          <input autoFocus name="mapName" defaultValue={nameRequest.value} aria-label="Map name" />
+          <div><button type="button" onClick={() => resolveMapName(null)}>Cancel</button><button type="submit" className="primary-action">{nameRequest.copy ? "Save copy" : "Save locally"}</button></div>
+        </form>
+      </div> : null}
+    </main>
+  );
+}

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 
-const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const html = await readFile(new URL("../classic/index.html", import.meta.url), "utf8");
+const betaHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+const betaApp = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const betaDocument = await readFile(new URL("../src/document.ts", import.meta.url), "utf8");
+const betaDatabase = await readFile(new URL("../src/db.ts", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -13,17 +17,27 @@ assert.equal(
   "Runtime scripts must be served locally so the app works offline"
 );
 assert.ok(
-  scriptSources.includes("vendor/pdf-lib.min.js"),
-  "index.html must load the vendored pdf-lib bundle"
+  scriptSources.includes("../pdf-lib.min.js"),
+  "classic recovery must load the vendored pdf-lib bundle"
 );
-assert.ok(scriptSources.includes("storage.js"), "index.html must load the storage module");
-assert.ok(scriptSources.includes("hierarchy.js"), "index.html must load the hierarchy module");
-assert.ok(scriptSources.includes("shortcuts.js"), "index.html must load the shortcut module");
+assert.ok(scriptSources.includes("../storage.js"), "classic recovery must load the storage module");
+assert.ok(scriptSources.includes("../hierarchy.js"), "classic recovery must load the hierarchy module");
+assert.ok(scriptSources.includes("../shortcuts.js"), "classic recovery must load the shortcut module");
 
 assert.doesNotMatch(html, /<button(?![^>]*\btype=["']button["'])/gi, "Every button must declare type=button");
 assert.match(html, />Save locally<\/button>/, "The explicit map save action must be labelled Save locally");
 assert.match(html, />Save as copy<\/button>/, "The toolbar must expose Save as copy");
-assert.match(html, /name="source-commit" content="__SOURCE_SHA__"/, "The deploy build must expose its source SHA");
+assert.match(betaHtml, /name="source-commit" content="__SOURCE_SHA__"/, "The deploy build must expose its source SHA");
+assert.match(betaHtml, /src="\/src\/main\.tsx"/, "The public beta must boot the Vite React editor");
+assert.match(betaApp, /<Excalidraw/, "The public beta must embed Excalidraw core");
+assert.match(betaApp, /Classic recovery/, "The public beta must retain a classic recovery path");
+assert.match(betaApp, /Save locally/, "The public beta must expose local named-map save");
+assert.match(betaApp, /Save as copy/, "The public beta must expose save-as-copy");
+assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
+assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
+assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
+assert.match(betaDatabase, /indexedDB\.open/, "Schema-3 documents must use IndexedDB");
+assert.match(betaDatabase, /compareMigration/, "Migration must perform read-back hierarchy verification");
 
 await access(new URL("../vendor/pdf-lib.min.js", import.meta.url));
 await access(new URL("../vendor/pdf-lib.LICENSE.md", import.meta.url));

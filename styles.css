@@ -72,6 +72,18 @@ button {
   gap: 0.25rem;
 }
 
+.classic-return {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 0.55rem;
+  color: #dbeafe;
+  text-decoration: none;
+  font-size: 0.82rem;
+}
+
 button.primary {
   background: linear-gradient(135deg, #2563eb, #4f46e5);
   border-color: transparent;
