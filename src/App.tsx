@@ -44,6 +44,7 @@ import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports"
 import type { DocumentV3, EditorTab } from "./types";
 import SimpleMindmap from "./SimpleMindmap";
 import OutlineView, { outlineMarkdown } from "./OutlineView";
+import NodeDetailsDialog from "./NodeDetailsDialog";
 import {
   addConnectedMindmapNode,
   ensureEditableMindmapElements,
@@ -51,6 +52,7 @@ import {
   replaceMindmapNodeTexts,
   removeMindmapSubtree,
   renameMindmapNode,
+  updateMindmapNodeContent,
 } from "./mindmap-operations";
 import "./app.css";
 import { revealFoldedNode, setNodesCollapsed } from "./folding.mjs";
@@ -174,6 +176,7 @@ export default function App() {
   const [searchTaskState, setSearchTaskState] = useState("all");
   const [searchResultIndex, setSearchResultIndex] = useState(0);
   const [searchRevision, setSearchRevision] = useState(0);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [helpQuery, setHelpQuery] = useState("");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
@@ -374,11 +377,12 @@ export default function App() {
         window.setTimeout(() => void saveLocally(event.shiftKey), 0);
         return;
       }
-      if ((paletteOpen || helpOpen || searchOpen) && event.key === "Escape") {
+      if ((paletteOpen || helpOpen || searchOpen || detailsOpen) && event.key === "Escape") {
         event.preventDefault();
         setPaletteOpen(false);
         setHelpOpen(false);
         setSearchOpen(false);
+        setDetailsOpen(false);
         return;
       }
       const id = commandForKeyboardEvent(event, api.getAppState());
@@ -391,7 +395,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [executeCommand, helpOpen, paletteOpen, saveLocally, searchOpen]);
+  }, [detailsOpen, executeCommand, helpOpen, paletteOpen, saveLocally, searchOpen]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -574,6 +578,17 @@ export default function App() {
     announce("Outline exported as Markdown.");
   }, [announce]);
 
+  const applyNodeDetails = useCallback((content: { notes?: string; url?: string; internalTargetNodeId?: string }) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    applyOutlineElements(
+      updateMindmapNodeContent(tab.document.scene.elements, simpleSelectedNodeId, content),
+      simpleSelectedNodeId,
+      "Node details saved.",
+    );
+    setDetailsOpen(false);
+  }, [applyOutlineElements, simpleSelectedNodeId]);
+
   const onSceneChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
       const tab = activeTabRef.current;
@@ -609,6 +624,11 @@ export default function App() {
         semanticUpdateRef.current = false;
       }
       activeTabRef.current = { ...tab, document };
+      if (surfaceModeRef.current === "whiteboard") {
+        const selectedNode = elements.find((element) => appState.selectedElementIds[element.id] && getMindmapNode(element));
+        const selectedNodeId = selectedNode && getMindmapNode(selectedNode)?.nodeId;
+        if (selectedNodeId) setSimpleSelectedNodeId((current) => current === selectedNodeId ? current : selectedNodeId);
+      }
       scheduleRecovery(document);
     },
     [announce, scheduleRecovery],
@@ -855,6 +875,7 @@ export default function App() {
           <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
         </div>
         <div className="mode-actions">
+          <button type="button" onClick={() => setDetailsOpen(true)}>Details</button>
           <button type="button" onClick={() => setSearchOpen(true)}>Search <kbd>{displayShortcut("Cmd/Ctrl+F")}</kbd></button>
           <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>{displayShortcut("Cmd/Ctrl+K")}</kbd></button>
           <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
@@ -1031,6 +1052,14 @@ export default function App() {
           <footer>Search never changes the map. Replacement only runs when you confirm it; Replace all is a single undo step.</footer>
         </section>
       </div> : null}
+
+      {detailsOpen ? <NodeDetailsDialog
+        elements={activeTab.document.scene.elements}
+        nodeId={simpleSelectedNodeId}
+        onApply={applyNodeDetails}
+        onClose={() => setDetailsOpen(false)}
+        announce={announce}
+      /> : null}
 
       {nameRequest ? <div className="modal-backdrop" role="presentation">
         <form className="name-dialog" role="dialog" aria-modal="true" aria-label={nameRequest.copy ? "Save copy as" : "Save map locally"} onSubmit={(event) => {

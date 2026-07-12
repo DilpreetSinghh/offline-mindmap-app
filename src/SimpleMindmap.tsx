@@ -12,6 +12,9 @@ type SimpleNode = {
   collapsed: boolean;
   childCount: number;
   hiddenDescendantCount: number;
+  notes?: string;
+  url?: string;
+  internalTargetNodeId?: string;
 };
 
 type SimpleMindmapProps = {
@@ -87,6 +90,7 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
               if (event.key === "Enter") event.currentTarget.blur();
             }}
           />
+          {node.notes || node.url || node.internalTargetNodeId ? <small className="simple-content-indicators">{node.notes ? "Note" : ""}{node.url ? " · Link" : ""}{node.internalTargetNodeId ? " · Topic" : ""}</small> : null}
         </label>
         <div className="simple-node-actions" aria-label={`Actions for ${node.text}`}>
           {node.childCount ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleFold(node.nodeId); }}>{node.collapsed ? `Expand +${node.hiddenDescendantCount}` : "Collapse"}</button> : null}

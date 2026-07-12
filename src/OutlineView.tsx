@@ -4,7 +4,7 @@ import { getMindmapNode } from "./document";
 import { foldingIndex } from "./folding.mjs";
 import type { OutlineMove } from "./mindmap-operations";
 
-type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: string[]; taskState: string; notes: string };
+type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: string[]; taskState: string; notes: string; url: string; internalTargetNodeId: string };
 type Props = { elements: readonly OrderedExcalidrawElement[]; rootNodeId: string; selectedNodeId: string; onSelect: (id: string) => void; onRename: (id: string, value: string) => void; onMove: (id: string, move: OutlineMove) => void; onDelete: (id: string) => void; onToggleFold: (id: string) => void; onExport: () => void };
 const ROW_HEIGHT = 54;
 
@@ -13,8 +13,8 @@ export function rowsFromElements(elements: readonly OrderedExcalidrawElement[], 
   const nodes = elements.flatMap((element) => {
     const data = getMindmapNode(element);
     if (!data) return [];
-    const extra = data as typeof data & { tags?: string[]; taskState?: string; notes?: string };
-    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: extra.tags ?? [], taskState: extra.taskState ?? "none", notes: extra.notes ?? "" }];
+    const extra = data as typeof data & { tags?: string[]; taskState?: string };
+    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: extra.tags ?? [], taskState: extra.taskState ?? "none", notes: data.notes ?? "", url: data.url ?? "", internalTargetNodeId: data.internalTargetNodeId ?? "" }];
   });
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const children = new Map<string | null, typeof nodes>();
@@ -47,7 +47,7 @@ const OutlineRow = memo(function OutlineRow({ row, selected, rootNodeId, onSelec
   return <div className={selected ? "outline-row selected" : "outline-row"} style={{ "--outline-depth": row.depth } as CSSProperties} data-node-id={row.nodeId} onClick={() => onSelect(row.nodeId)} onKeyDown={(event) => onKey(event, row.nodeId)}>
     <button className="outline-fold" type="button" disabled={!row.childCount} aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`} onClick={(event) => { event.stopPropagation(); onToggleFold(row.nodeId); }}>{row.childCount ? row.collapsed ? "▸" : "▾" : "·"}</button>
     <input value={draft} aria-label={`Outline title ${row.title}`} onFocus={() => onSelect(row.nodeId)} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); onKey(event, row.nodeId); }} />
-    <span className="outline-meta">{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.taskState !== "none" ? ` ${row.taskState}` : ""}{row.tags.map((tag) => ` #${tag}`).join("")}{row.notes ? " • note" : ""}</span>
+    <span className="outline-meta">{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.taskState !== "none" ? ` ${row.taskState}` : ""}{row.tags.map((tag) => ` #${tag}`).join("")}{row.notes ? " • note" : ""}{row.url ? " • link" : ""}{row.internalTargetNodeId ? " • topic" : ""}</span>
     <div className="outline-actions"><button type="button" title="Move up" onClick={() => onMove(row.nodeId, "up")}>↑</button><button type="button" title="Move down" onClick={() => onMove(row.nodeId, "down")}>↓</button><button type="button" title="Indent" onClick={() => onMove(row.nodeId, "indent")}>→</button><button type="button" title="Outdent" onClick={() => onMove(row.nodeId, "outdent")}>←</button>{row.nodeId !== rootNodeId ? <button type="button" title="Delete" onClick={() => onDelete(row.nodeId)}>×</button> : null}</div>
   </div>;
 });

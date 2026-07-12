@@ -124,6 +124,23 @@ export function replaceMindmapNodeTexts(
   });
 }
 
+export function updateMindmapNodeContent(
+  elements: readonly OrderedExcalidrawElement[],
+  nodeId: string,
+  content: Pick<MindmapNodeData, "notes" | "url" | "internalTargetNodeId">,
+): OrderedExcalidrawElement[] {
+  return elements.map((element) => {
+    const node = getMindmapNode(element);
+    if (!node || node.nodeId !== nodeId) return element;
+    const updated: MindmapNodeData = { ...node };
+    for (const [key, value] of Object.entries(content)) {
+      if (value) Object.assign(updated, { [key]: value });
+      else delete (updated as unknown as Record<string, unknown>)[key];
+    }
+    return newElementWith(element, { customData: { ...element.customData, mindmapNode: updated }, link: content.url || null }) as OrderedExcalidrawElement;
+  });
+}
+
 export function reflowMindmapElements(
   elements: readonly OrderedExcalidrawElement[],
   requestedRootNodeId?: string,

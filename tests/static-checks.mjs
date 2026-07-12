@@ -12,6 +12,7 @@ const betaOperations = await readFile(new URL("../src/mindmap-operations.ts", im
 const betaExports = await readFile(new URL("../src/exports.ts", import.meta.url), "utf8");
 const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
 const outlineView = await readFile(new URL("../src/OutlineView.tsx", import.meta.url), "utf8");
+const nodeDetails = await readFile(new URL("../src/NodeDetailsDialog.tsx", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -57,6 +58,9 @@ assert.match(betaApp, /surfaceMode === "outline"/, "The active map must expose a
 assert.match(outlineView, /rows\.slice\(start, end\)/, "Large outlines must render a virtual window instead of every row");
 assert.match(outlineView, /Alt\+↑\/↓ reorder/, "The outline must advertise keyboard structural editing");
 assert.match(outlineView, /outlineMarkdown/, "The outline must support independent Markdown export");
+assert.match(nodeDetails, /sanitiseNodeUrl/, "Node links must be sanitised before save or open");
+assert.match(nodeDetails, /Missing topic:/, "Broken internal topic links must be visibly repairable");
+assert.match(nodeDetails, /External links open only when you press Open link/, "External links must require explicit user action");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");

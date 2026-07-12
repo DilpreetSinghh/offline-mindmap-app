@@ -9,6 +9,9 @@ export type MindmapNodeData = {
   parentNodeId: string | null;
   siblingOrder: number;
   collapsed: boolean;
+  notes?: string;
+  url?: string;
+  internalTargetNodeId?: string;
 };
 
 export type MindmapConnectionData = {
