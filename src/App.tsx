@@ -589,6 +589,17 @@ export default function App() {
     setDetailsOpen(false);
   }, [applyOutlineElements, simpleSelectedNodeId]);
 
+  const openNodeDetails = useCallback(() => {
+    const api = apiRef.current;
+    if (surfaceModeRef.current === "whiteboard" && api) {
+      const selected = api.getAppState().selectedElementIds;
+      const shape = api.getSceneElements().find((element) => selected[element.id] && getMindmapNode(element));
+      const nodeId = shape && getMindmapNode(shape)?.nodeId;
+      if (nodeId) setSimpleSelectedNodeId(nodeId);
+    }
+    setDetailsOpen(true);
+  }, []);
+
   const onSceneChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
       const tab = activeTabRef.current;
@@ -624,11 +635,6 @@ export default function App() {
         semanticUpdateRef.current = false;
       }
       activeTabRef.current = { ...tab, document };
-      if (surfaceModeRef.current === "whiteboard") {
-        const selectedNode = elements.find((element) => appState.selectedElementIds[element.id] && getMindmapNode(element));
-        const selectedNodeId = selectedNode && getMindmapNode(selectedNode)?.nodeId;
-        if (selectedNodeId) setSimpleSelectedNodeId((current) => current === selectedNodeId ? current : selectedNodeId);
-      }
       scheduleRecovery(document);
     },
     [announce, scheduleRecovery],
@@ -875,7 +881,7 @@ export default function App() {
           <button type="button" aria-pressed={surfaceMode === "whiteboard" && surfaceOverride !== null} onClick={() => chooseSurfaceMode("whiteboard")}>Whiteboard</button>
         </div>
         <div className="mode-actions">
-          <button type="button" onClick={() => setDetailsOpen(true)}>Details</button>
+          <button type="button" onClick={openNodeDetails}>Details</button>
           <button type="button" onClick={() => setSearchOpen(true)}>Search <kbd>{displayShortcut("Cmd/Ctrl+F")}</kbd></button>
           <button type="button" onClick={() => setPaletteOpen(true)}>Commands <kbd>{displayShortcut("Cmd/Ctrl+K")}</kbd></button>
           <a className="button-link" href="./classic/index.html" onClick={() => localStorage.setItem(EDITOR_MODE_KEY, "classic")}>Classic recovery</a>
