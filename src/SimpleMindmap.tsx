@@ -2,6 +2,8 @@ import { memo, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { getMindmapConnection, getMindmapNode } from "./document";
 import { foldingIndex } from "./folding.mjs";
+import { isTaskOverdue, tagColor, tagName, taskIndicator } from "./tasks.mjs";
+import type { MindmapNodeData } from "./types";
 
 type SimpleNode = {
   nodeId: string;
@@ -15,6 +17,8 @@ type SimpleNode = {
   notes?: string;
   url?: string;
   internalTargetNodeId?: string;
+  task?: MindmapNodeData["task"];
+  tags?: MindmapNodeData["tags"];
 };
 
 type SimpleMindmapProps = {
@@ -69,6 +73,8 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
     setDraft(next);
     if (next !== node.text) onRename(node.nodeId, next);
   };
+  const taskText = taskIndicator({ task: node.task, tags: [] });
+  const hasIndicators = Boolean(node.notes || node.url || node.internalTargetNodeId || taskText || node.tags?.length);
   return (
     <article
       id={`simple-node-${node.nodeId}`}
@@ -90,7 +96,11 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
               if (event.key === "Enter") event.currentTarget.blur();
             }}
           />
-          {node.notes || node.url || node.internalTargetNodeId ? <small className="simple-content-indicators">{node.notes ? "Note" : ""}{node.url ? " · Link" : ""}{node.internalTargetNodeId ? " · Topic" : ""}</small> : null}
+          {hasIndicators ? <small className={isTaskOverdue(node.task) ? "simple-content-indicators overdue" : "simple-content-indicators"}>
+            {taskText ? <b>{taskText}</b> : null}
+            {(node.tags ?? []).map((tag, index) => <em key={`${tagName(tag)}-${index}`} style={{ backgroundColor: tagColor(tag) }}>#{tagName(tag)}</em>)}
+            {node.notes ? <span>Note</span> : null}{node.url ? <span>Link</span> : null}{node.internalTargetNodeId ? <span>Topic</span> : null}
+          </small> : null}
         </label>
         <div className="simple-node-actions" aria-label={`Actions for ${node.text}`}>
           {node.childCount ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleFold(node.nodeId); }}>{node.collapsed ? `Expand +${node.hiddenDescendantCount}` : "Collapse"}</button> : null}

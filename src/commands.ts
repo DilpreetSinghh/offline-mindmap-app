@@ -14,6 +14,7 @@ import {
 import {
   addConnectedMindmapNode,
   getMindmapNodeText,
+  propagateTaskElements,
   reflowConnectedMindmapTree,
   reflowMindmapElements,
   removeMindmapSubtrees,
@@ -443,7 +444,7 @@ function pasteOutline(context: CommandContext, text: string): void {
     const siblings = siblingState.get(parentNodeId) ?? { base: 0, count: 0 };
     const siblingOrder = siblings.base + siblings.count;
     siblingState.set(parentNodeId, { ...siblings, count: siblings.count + 1 });
-    const created = createMindmapElements(
+    const createdBase = createMindmapElements(
       nodeId,
       record.text,
       target.x + 280 + record.depth * 230,
@@ -451,6 +452,17 @@ function pasteOutline(context: CommandContext, text: string): void {
       parentNodeId,
       siblingOrder,
     );
+    const created = createdBase.map((element) => {
+      const data = getMindmapNode(element);
+      if (!data || (!record.task && !record.tags)) return element;
+      return {
+        ...element,
+        customData: {
+          ...element.customData,
+          mindmapNode: { ...data, ...(record.task ? { task: record.task } : {}), ...(record.tags ? { tags: record.tags } : {}) },
+        },
+      } as OrderedExcalidrawElement;
+    });
     const shape = created.find((element) => getMindmapNode(element))!;
     scene.push(...created);
     const parentElementId = record.parentIndex === null ? target.id : shapeByIndex.get(record.parentIndex)!;
@@ -458,7 +470,7 @@ function pasteOutline(context: CommandContext, text: string): void {
     idByIndex.set(index, nodeId);
     shapeByIndex.set(index, shape.id);
   });
-  transact(context.api, reflowMindmapElements(scene, context.rootNodeId), [...shapeByIndex.values()]);
+  transact(context.api, reflowMindmapElements(propagateTaskElements(scene), context.rootNodeId), [...shapeByIndex.values()]);
   context.announce(`Pasted ${records.length} outline node${records.length === 1 ? "" : "s"}.`);
 }
 

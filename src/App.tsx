@@ -43,7 +43,7 @@ import {
 import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
 import type { DocumentV3, EditorTab } from "./types";
 import SimpleMindmap from "./SimpleMindmap";
-import OutlineView, { outlineMarkdown } from "./OutlineView";
+import OutlineView, { outlineMarkdown, taskPaperMarkdown } from "./OutlineView";
 import NodeDetailsDialog from "./NodeDetailsDialog";
 import {
   addConnectedMindmapNode,
@@ -174,6 +174,8 @@ export default function App() {
   const [searchVisibility, setSearchVisibility] = useState("all");
   const [searchTag, setSearchTag] = useState("");
   const [searchTaskState, setSearchTaskState] = useState("all");
+  const [searchPriority, setSearchPriority] = useState("");
+  const [searchOverdue, setSearchOverdue] = useState(false);
   const [searchResultIndex, setSearchResultIndex] = useState(0);
   const [searchRevision, setSearchRevision] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -574,11 +576,30 @@ export default function App() {
     anchor.href = url;
     anchor.download = `${tab.document.name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "outline"}.md`;
     anchor.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
     announce("Outline exported as Markdown.");
   }, [announce]);
 
-  const applyNodeDetails = useCallback((content: { notes?: string; url?: string; internalTargetNodeId?: string }) => {
+  const exportTasks = useCallback(() => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const content = taskPaperMarkdown(tab.document.scene.elements, tab.document.rootNodeId);
+    if (!content.trim()) {
+      announce("No tasks to export.", "error");
+      return;
+    }
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    const name = tab.document.name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "mind-map";
+    anchor.download = `${name}-tasks.md`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    announce("Tasks exported as Markdown with TaskPaper metadata.");
+  }, [announce]);
+
+  const applyNodeDetails = useCallback((content: Pick<NonNullable<ReturnType<typeof getMindmapNode>>, "notes" | "url" | "internalTargetNodeId" | "task" | "tags">) => {
     const tab = activeTabRef.current;
     if (!tab) return;
     applyOutlineElements(
@@ -758,23 +779,16 @@ export default function App() {
     visibility: searchVisibility,
     tag: searchTag,
     taskState: searchTaskState,
-  }), [searchCaseSensitive, searchDepth, searchQuery, searchRecords, searchTag, searchTaskState, searchVisibility, searchWholeWord]);
+    priority: searchPriority === "" ? null : Number(searchPriority),
+    overdue: searchOverdue,
+  }), [searchCaseSensitive, searchDepth, searchOverdue, searchPriority, searchQuery, searchRecords, searchTag, searchTaskState, searchVisibility, searchWholeWord]);
   const currentSearchResult = searchResults.length
     ? searchResults[Math.min(searchResultIndex, searchResults.length - 1)]
     : null;
 
   useEffect(() => {
     setSearchResultIndex(0);
-  }, [searchQuery, searchCaseSensitive, searchWholeWord, searchDepth, searchVisibility, searchTag, searchTaskState]);
-
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api || surfaceModeRef.current !== "whiteboard") return;
-    const ids = searchOpen
-      ? Object.fromEntries(searchResults.filter((result) => !result.hidden).map((result) => [result.elementId, true]))
-      : {};
-    api.updateScene({ appState: { selectedElementIds: ids }, captureUpdate: CaptureUpdateAction.NEVER });
-  }, [searchOpen, searchResults]);
+  }, [searchQuery, searchCaseSensitive, searchWholeWord, searchDepth, searchVisibility, searchTag, searchTaskState, searchPriority, searchOverdue]);
 
   const navigateSearchResult = useCallback((index: number) => {
     if (!searchResults.length) return;
@@ -990,6 +1004,7 @@ export default function App() {
             onMove={moveOutlineNode}
             onDelete={deleteOutlineNode}
             onToggleFold={toggleOutlineFold}
+            onExportTasks={exportTasks}
             onExport={exportOutline}
           />
         </section> : null}
@@ -1045,6 +1060,8 @@ export default function App() {
             <label>Visibility <select value={searchVisibility} onChange={(event) => setSearchVisibility(event.target.value)}><option value="all">All nodes</option><option value="visible">Visible only</option><option value="hidden">Collapsed only</option></select></label>
             <label>Tag <input placeholder="Any tag" value={searchTag} onChange={(event) => setSearchTag(event.target.value)} /></label>
             <label>Task <select value={searchTaskState} onChange={(event) => setSearchTaskState(event.target.value)}><option value="all">Any task state</option><option value="none">Not a task</option><option value="open">Open</option><option value="done">Done</option></select></label>
+            <label>Priority <select value={searchPriority} onChange={(event) => setSearchPriority(event.target.value)}><option value="">Any priority</option><option value="1">P1</option><option value="2">P2</option><option value="3">P3</option><option value="4">P4</option></select></label>
+            <label><input type="checkbox" checked={searchOverdue} onChange={(event) => setSearchOverdue(event.target.checked)} /> Overdue only</label>
           </div>
           <div className="search-result-list" aria-label="Search results">
             {searchResults.slice(0, 100).map((result, index) => <button type="button" className={index === searchResultIndex ? "active" : ""} key={result.nodeId} onClick={() => navigateSearchResult(index)}><span>{result.title}<small>Depth {result.depth}{result.hidden ? " · Hidden in collapsed branch" : ""}</small></span><b>{result.hidden ? "Reveal" : "Go"}</b></button>)}

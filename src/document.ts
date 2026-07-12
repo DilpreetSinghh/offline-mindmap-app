@@ -15,6 +15,7 @@ import {
 } from "./types";
 import { validateHierarchyIndex } from "./hierarchy-index.mjs";
 import { foldingIndex, mergeFoldedElements, visibleFoldedElements } from "./folding.mjs";
+import { tagColor, taskIndicator } from "./tasks.mjs";
 export { normaliseRootlessWhiteboard } from "./rootless-whiteboard.mjs";
 
 export function createId(prefix: string): string {
@@ -56,6 +57,25 @@ export function projectFoldedElements(
       backgroundColor: "transparent",
       locked: true,
       customData: { foldBadge: { ownerElementId: shape.id, hiddenCount: count } },
+    });
+  }
+  for (const element of visible) {
+    const node = getMindmapNode(element);
+    const text = taskIndicator(node);
+    if (!node || !text) continue;
+    badges.push({
+      type: "text",
+      id: `marker-badge-${element.id}`,
+      x: element.x + 8,
+      y: element.y + element.height + 5,
+      text,
+      fontSize: 12,
+      textAlign: "left",
+      verticalAlign: "middle",
+      strokeColor: node.tags?.length ? tagColor(node.tags[0]) : "#6b5638",
+      backgroundColor: "transparent",
+      locked: true,
+      customData: { foldBadge: { ownerElementId: element.id, kind: "task-marker" } },
     });
   }
   const convertedBadges = badges.length
@@ -356,6 +376,22 @@ export function validateDocument(document: DocumentV3): DocumentValidation {
     if (!node.nodeId || nodes.has(node.nodeId)) errors.push(`Duplicate or missing node ID: ${node.nodeId}`);
     else nodes.set(node.nodeId, node);
     if (!Number.isFinite(node.siblingOrder)) errors.push(`Invalid sibling order: ${node.nodeId}`);
+    if (node.task) {
+      if (node.task.state !== "open" && node.task.state !== "done") errors.push(`Invalid task state: ${node.nodeId}`);
+      if (node.task.priority !== undefined && ![1, 2, 3, 4].includes(node.task.priority)) errors.push(`Invalid task priority: ${node.nodeId}`);
+      if (node.task.progress !== undefined && (!Number.isFinite(node.task.progress) || node.task.progress < 0 || node.task.progress > 100)) errors.push(`Invalid task progress: ${node.nodeId}`);
+      if (node.task.dueDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(node.task.dueDate)) errors.push(`Invalid task due date: ${node.nodeId}`);
+      if (node.task.marker !== undefined && (typeof node.task.marker !== "string" || node.task.marker.length > 16)) errors.push(`Invalid task marker: ${node.nodeId}`);
+      if (node.task.autoProgress !== undefined && typeof node.task.autoProgress !== "boolean") errors.push(`Invalid automatic task progress: ${node.nodeId}`);
+    }
+    if (node.tags !== undefined) {
+      if (!Array.isArray(node.tags)) errors.push(`Invalid tags: ${node.nodeId}`);
+      else for (const tag of node.tags) {
+        const valid = typeof tag === "string" && Boolean(tag.trim())
+          || Boolean(tag && typeof tag === "object" && typeof tag.name === "string" && tag.name.trim() && typeof tag.color === "string" && /^#[0-9a-f]{6}$/i.test(tag.color));
+        if (!valid) errors.push(`Invalid tag: ${node.nodeId}`);
+      }
+    }
   }
   if (nodes.size) errors.push(...validateHierarchyIndex([...nodes.values()], document?.rootNodeId).errors);
 

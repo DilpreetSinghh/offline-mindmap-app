@@ -13,6 +13,7 @@ import { inferBoundTree } from "./bound-tree.mjs";
 import { expandSelectedBranches } from "./subtree-selection.mjs";
 import { moveOutlineRecords } from "./outline-hierarchy.mjs";
 import { inheritedNodeStyle } from "./node-style.mjs";
+import { propagateTaskRecords } from "./tasks.mjs";
 import type { MindmapNodeData } from "./types";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
@@ -128,9 +129,9 @@ export function replaceMindmapNodeTexts(
 export function updateMindmapNodeContent(
   elements: readonly OrderedExcalidrawElement[],
   nodeId: string,
-  content: Pick<MindmapNodeData, "notes" | "url" | "internalTargetNodeId">,
+  content: Pick<MindmapNodeData, "notes" | "url" | "internalTargetNodeId" | "task" | "tags">,
 ): OrderedExcalidrawElement[] {
-  return elements.map((element) => {
+  const updatedElements = elements.map((element) => {
     const node = getMindmapNode(element);
     if (!node || node.nodeId !== nodeId) return element;
     const updated: MindmapNodeData = { ...node };
@@ -139,6 +140,23 @@ export function updateMindmapNodeContent(
       else delete (updated as unknown as Record<string, unknown>)[key];
     }
     return newElementWith(element, { customData: { ...element.customData, mindmapNode: updated }, link: content.url || null }) as OrderedExcalidrawElement;
+  });
+  return propagateTaskElements(updatedElements);
+}
+
+export function propagateTaskElements(
+  elements: readonly OrderedExcalidrawElement[],
+): OrderedExcalidrawElement[] {
+  const records = elements.flatMap((element) => {
+    const node = getMindmapNode(element);
+    return node ? [node] : [];
+  });
+  const propagated = new Map((propagateTaskRecords(records) as MindmapNodeData[]).map((node) => [node.nodeId, node]));
+  return elements.map((element) => {
+    const node = getMindmapNode(element);
+    const next = node && propagated.get(node.nodeId);
+    const taskChanged = next && JSON.stringify(next.task) !== JSON.stringify(node?.task);
+    return next && taskChanged ? newElementWith(element, { customData: { ...element.customData, mindmapNode: next } }) as OrderedExcalidrawElement : element;
   });
 }
 
@@ -284,6 +302,7 @@ export function addConnectedMindmapNode(
     nodeId,
     "hierarchy",
   );
+  next = propagateTaskElements(next);
   if (shouldReflowAfterInsertion(direction)) next = reflowMindmapElements(next);
   return { elements: next, nodeElementId: shape.id, nodeId };
 }
@@ -320,7 +339,7 @@ export function removeMindmapSubtrees(
     const connection = getMindmapConnection(element);
     return !connection || (!wanted.has(connection.fromNodeId) && !wanted.has(connection.toNodeId));
   });
-  return reflowMindmapElements(remaining, rootNodeId);
+  return reflowMindmapElements(propagateTaskElements(remaining), rootNodeId);
 }
 
 export type OutlineMove = "up" | "down" | "indent" | "outdent";
@@ -359,5 +378,5 @@ export function moveMindmapNodeInOutline(
     if (!parentShape || !childShape) return null;
     next = appendBoundConnection(next, parentShape.id, childShape.id, nextParentId, nodeId, "hierarchy");
   }
-  return reflowMindmapElements(next);
+  return reflowMindmapElements(propagateTaskElements(next));
 }

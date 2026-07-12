@@ -3,9 +3,11 @@ import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/ty
 import { getMindmapNode } from "./document";
 import { foldingIndex } from "./folding.mjs";
 import type { OutlineMove } from "./mindmap-operations";
+import { isTaskOverdue, tagColor, tagName, taskMarkdown } from "./tasks.mjs";
+import type { MindmapNodeData } from "./types";
 
-type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: string[]; taskState: string; notes: string; url: string; internalTargetNodeId: string };
-type Props = { elements: readonly OrderedExcalidrawElement[]; rootNodeId: string; selectedNodeId: string; onSelect: (id: string) => void; onRename: (id: string, value: string) => void; onMove: (id: string, move: OutlineMove) => void; onDelete: (id: string) => void; onToggleFold: (id: string) => void; onExport: () => void };
+type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: NonNullable<MindmapNodeData["tags"]>; task?: MindmapNodeData["task"]; notes: string; url: string; internalTargetNodeId: string };
+type Props = { elements: readonly OrderedExcalidrawElement[]; rootNodeId: string; selectedNodeId: string; onSelect: (id: string) => void; onRename: (id: string, value: string) => void; onMove: (id: string, move: OutlineMove) => void; onDelete: (id: string) => void; onToggleFold: (id: string) => void; onExport: () => void; onExportTasks: () => void };
 const ROW_HEIGHT = 54;
 
 export function rowsFromElements(elements: readonly OrderedExcalidrawElement[], rootNodeId: string): Row[] {
@@ -13,8 +15,7 @@ export function rowsFromElements(elements: readonly OrderedExcalidrawElement[], 
   const nodes = elements.flatMap((element) => {
     const data = getMindmapNode(element);
     if (!data) return [];
-    const extra = data as typeof data & { tags?: string[]; taskState?: string };
-    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: extra.tags ?? [], taskState: extra.taskState ?? "none", notes: data.notes ?? "", url: data.url ?? "", internalTargetNodeId: data.internalTargetNodeId ?? "" }];
+    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: data.tags ?? [], notes: data.notes ?? "", url: data.url ?? "", internalTargetNodeId: data.internalTargetNodeId ?? "" }];
   });
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const children = new Map<string | null, typeof nodes>();
@@ -37,7 +38,26 @@ export function rowsFromElements(elements: readonly OrderedExcalidrawElement[], 
 }
 
 export function outlineMarkdown(elements: readonly OrderedExcalidrawElement[], rootNodeId: string): string {
-  return `${rowsFromElements(elements, rootNodeId).map((row) => `${"  ".repeat(row.depth)}- ${row.title}`).join("\n")}\n`;
+  return `${rowsFromElements(elements, rootNodeId).map((row) => `${"  ".repeat(row.depth)}${row.task ? taskMarkdown(row.title, row) : `- ${row.title}`}`).join("\n")}\n`;
+}
+
+export function taskPaperMarkdown(elements: readonly OrderedExcalidrawElement[], rootNodeId: string): string {
+  const rows = rowsFromElements(elements, rootNodeId);
+  const byId = new Map(rows.map((row) => [row.nodeId, row]));
+  const taskDepth = (row: Row) => {
+    let depth = 0;
+    let parentId = row.parentNodeId;
+    const seen = new Set<string>();
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent) break;
+      if (parent.task) depth += 1;
+      parentId = parent.parentNodeId;
+    }
+    return depth;
+  };
+  return `${rows.filter((row) => row.task).map((row) => `${"  ".repeat(taskDepth(row))}${taskMarkdown(row.title, row)}`).join("\n")}\n`;
 }
 
 const OutlineRow = memo(function OutlineRow({ row, selected, rootNodeId, onSelect, onRename, onMove, onDelete, onToggleFold, onKey }: { row: Row; selected: boolean; rootNodeId: string; onSelect: (id: string) => void; onRename: (id: string, value: string) => void; onMove: (id: string, move: OutlineMove) => void; onDelete: (id: string) => void; onToggleFold: (id: string) => void; onKey: (event: KeyboardEvent, id: string) => void }) {
@@ -47,7 +67,7 @@ const OutlineRow = memo(function OutlineRow({ row, selected, rootNodeId, onSelec
   return <div className={selected ? "outline-row selected" : "outline-row"} style={{ "--outline-depth": row.depth } as CSSProperties} data-node-id={row.nodeId} onClick={() => onSelect(row.nodeId)} onKeyDown={(event) => onKey(event, row.nodeId)}>
     <button className="outline-fold" type="button" disabled={!row.childCount} aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`} onClick={(event) => { event.stopPropagation(); onToggleFold(row.nodeId); }}>{row.childCount ? row.collapsed ? "▸" : "▾" : "·"}</button>
     <input value={draft} aria-label={`Outline title ${row.title}`} onFocus={() => onSelect(row.nodeId)} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); onKey(event, row.nodeId); }} />
-    <span className="outline-meta">{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.taskState !== "none" ? ` ${row.taskState}` : ""}{row.tags.map((tag) => ` #${tag}`).join("")}{row.notes ? " • note" : ""}{row.url ? " • link" : ""}{row.internalTargetNodeId ? " • topic" : ""}</span>
+    <span className={isTaskOverdue(row.task) ? "outline-meta overdue" : "outline-meta"}>{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.task ? <b>{row.task.state === "done" ? "☑" : "☐"}{row.task.priority ? ` P${row.task.priority}` : ""}{row.task.progress != null ? ` ${row.task.progress}%` : ""}{row.task.dueDate ? ` · ${row.task.dueDate}` : ""}{row.task.marker ? ` ${row.task.marker}` : ""}</b> : null}{row.tags.map((tag, index) => <em key={`${tagName(tag)}-${index}`} style={{ backgroundColor: tagColor(tag) }}>#{tagName(tag)}</em>)}{row.notes ? " • note" : ""}{row.url ? " • link" : ""}{row.internalTargetNodeId ? " • topic" : ""}</span>
     <div className="outline-actions"><button type="button" title="Move up" onClick={() => onMove(row.nodeId, "up")}>↑</button><button type="button" title="Move down" onClick={() => onMove(row.nodeId, "down")}>↓</button><button type="button" title="Indent" onClick={() => onMove(row.nodeId, "indent")}>→</button><button type="button" title="Outdent" onClick={() => onMove(row.nodeId, "outdent")}>←</button>{row.nodeId !== rootNodeId ? <button type="button" title="Delete" onClick={() => onDelete(row.nodeId)}>×</button> : null}</div>
   </div>;
 });
@@ -67,5 +87,5 @@ export default function OutlineView(props: Props) {
     if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); const row = rows[index + (event.key === "ArrowUp" ? -1 : 1)]; if (row) props.onSelect(row.nodeId); }
     if (event.key === "Delete" && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); props.onDelete(nodeId); }
   };
-  return <section className="outline-view" aria-label="Map outline"><header><div><span className="eyebrow">SYNCHRONISED</span><h1>Outline</h1><p>{rows.length} visible node{rows.length === 1 ? "" : "s"}</p></div><button type="button" onClick={props.onExport}>Export outline</button></header><div ref={scrollRef} className="outline-scroll" tabIndex={0} onScroll={(event) => setViewport((value) => ({ ...value, top: event.currentTarget.scrollTop }))}><div className="outline-window" style={{ height: rows.length * ROW_HEIGHT }}>{rows.slice(start, end).map((row, offset) => <div className="outline-position" key={row.nodeId} style={{ top: (start + offset) * ROW_HEIGHT }}><OutlineRow row={row} selected={row.nodeId === props.selectedNodeId} rootNodeId={props.rootNodeId} onSelect={props.onSelect} onRename={props.onRename} onMove={props.onMove} onDelete={props.onDelete} onToggleFold={props.onToggleFold} onKey={onKey} /></div>)}</div></div><footer>Arrow keys select · Alt+↑/↓ reorder · Tab indents · Shift+Tab outdents · Enter commits</footer></section>;
+  return <section className="outline-view" aria-label="Map outline"><header><div><span className="eyebrow">SYNCHRONISED</span><h1>Outline</h1><p>{rows.length} visible node{rows.length === 1 ? "" : "s"}</p></div><div><button type="button" onClick={props.onExportTasks}>Export tasks</button><button type="button" onClick={props.onExport}>Export outline</button></div></header><div ref={scrollRef} className="outline-scroll" tabIndex={0} onScroll={(event) => setViewport((value) => ({ ...value, top: event.currentTarget.scrollTop }))}><div className="outline-window" style={{ height: rows.length * ROW_HEIGHT }}>{rows.slice(start, end).map((row, offset) => <div className="outline-position" key={row.nodeId} style={{ top: (start + offset) * ROW_HEIGHT }}><OutlineRow row={row} selected={row.nodeId === props.selectedNodeId} rootNodeId={props.rootNodeId} onSelect={props.onSelect} onRename={props.onRename} onMove={props.onMove} onDelete={props.onDelete} onToggleFold={props.onToggleFold} onKey={onKey} /></div>)}</div></div><footer>Arrow keys select · Alt+↑/↓ reorder · Tab indents · Shift+Tab outdents · Enter commits</footer></section>;
 }

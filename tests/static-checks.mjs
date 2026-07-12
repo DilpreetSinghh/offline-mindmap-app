@@ -13,6 +13,7 @@ const betaExports = await readFile(new URL("../src/exports.ts", import.meta.url)
 const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
 const outlineView = await readFile(new URL("../src/OutlineView.tsx", import.meta.url), "utf8");
 const nodeDetails = await readFile(new URL("../src/NodeDetailsDialog.tsx", import.meta.url), "utf8");
+const taskHelpers = await readFile(new URL("../src/tasks.mjs", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -61,6 +62,14 @@ assert.match(outlineView, /outlineMarkdown/, "The outline must support independe
 assert.match(nodeDetails, /sanitiseNodeUrl/, "Node links must be sanitised before save or open");
 assert.match(nodeDetails, /Missing topic:/, "Broken internal topic links must be visibly repairable");
 assert.match(nodeDetails, /External links open only when you press Open link/, "External links must require explicit user action");
+assert.match(nodeDetails, /Make this node a task/, "Node details must expose task editing");
+assert.match(betaDocument, /Invalid task priority/, "Native JSON validation must cover task metadata");
+assert.match(betaDocument, /kind: "task-marker"/, "Whiteboard nodes must project visible task and tag markers");
+assert.match(outlineView, /taskPaperMarkdown/, "Tasks must have an independent Markdown and TaskPaper-compatible export");
+assert.match(betaApp, /Overdue only/, "Search must expose an overdue task filter");
+assert.match(betaApp, /onExportTasks=\{exportTasks\}/, "Outline must expose task export");
+assert.match(simpleMindmap, /taskIndicator/, "Simple mode must show task state without opening details");
+assert.match(taskHelpers, /propagateTaskRecords/, "Automatic parent progress must be persisted in canonical node records");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");

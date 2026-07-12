@@ -12,6 +12,15 @@ export type MindmapNodeData = {
   notes?: string;
   url?: string;
   internalTargetNodeId?: string;
+  task?: {
+    state: "open" | "done";
+    priority?: 1 | 2 | 3 | 4;
+    dueDate?: string;
+    progress?: number;
+    marker?: string;
+    autoProgress?: boolean;
+  };
+  tags?: Array<string | { name: string; color: string }>;
 };
 
 export type MindmapConnectionData = {
