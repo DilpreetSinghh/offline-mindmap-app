@@ -12,6 +12,7 @@ import { calculateTreeLayout, shouldReflowAfterInsertion } from "./tree-layout.m
 import { inferBoundTree } from "./bound-tree.mjs";
 import { expandSelectedBranches } from "./subtree-selection.mjs";
 import { moveOutlineRecords } from "./outline-hierarchy.mjs";
+import { inheritedNodeStyle } from "./node-style.mjs";
 import type { MindmapNodeData } from "./types";
 
 export type NodeDirection = "left" | "right" | "up" | "down" | "child" | "sibling";
@@ -258,7 +259,7 @@ export function addConnectedMindmapNode(
   } as const;
   const [dx, dy] = offsets[direction];
   const nodeId = createId("node");
-  const created = createMindmapElements(
+  const createdBase = createMindmapElements(
     nodeId,
     "New idea",
     parentElement.x + dx,
@@ -266,6 +267,13 @@ export function addConnectedMindmapNode(
     parentNodeId,
     nextSiblingOrder(elements, parentNodeId),
   );
+  const sourceLabel = elements.find((element) => element.type === "text" && element.containerId === parentElement.id);
+  const inherited = inheritedNodeStyle(parentElement, sourceLabel);
+  const created = createdBase.map((element) => {
+    if (getMindmapNode(element)) return newElementWith(element, inherited.shape) as OrderedExcalidrawElement;
+    if (element.type === "text") return newElementWith(element, inherited.label) as OrderedExcalidrawElement;
+    return element;
+  });
   const shape = created.find((element) => getMindmapNode(element));
   if (!shape) return null;
   let next = appendBoundConnection(

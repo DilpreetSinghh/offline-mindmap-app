@@ -597,7 +597,7 @@ function reflowMap(context: CommandContext): void {
 
 export const commandRegistry: readonly Command[] = [
   { id: "new-child", label: "Create child node", shortcut: "Tab", keywords: "child branch", execute: (c) => addConnectedNode(c, "child") },
-  { id: "new-sibling", label: "Create sibling node", shortcut: "Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
+  { id: "new-sibling", label: "Create sibling node", shortcut: "Cmd/Ctrl+Enter", keywords: "sibling peer", execute: (c) => addConnectedNode(c, "sibling") },
   { id: "new-left", label: "Create node to the left", shortcut: "Cmd/Ctrl+←", keywords: "left node", execute: (c) => addConnectedNode(c, "left") },
   { id: "new-right", label: "Create node to the right", shortcut: "Cmd/Ctrl+→", keywords: "right node", execute: (c) => addConnectedNode(c, "right") },
   { id: "new-up", label: "Create node above", shortcut: "Cmd/Ctrl+↑", keywords: "up node", execute: (c) => addConnectedNode(c, "up") },

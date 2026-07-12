@@ -15,9 +15,9 @@ export function routeMindmapShortcut(event, state = {}) {
   if (!modifier && !event.altKey && key === "?") return "shortcut-help";
   if (event.altKey || event.shiftKey) return null;
   if (modifier && key.startsWith("Arrow")) return `new-${key.slice(5).toLowerCase()}`;
+  if (modifier && key === "Enter") return "new-sibling";
   if (!modifier && key.startsWith("Arrow")) return `select-${key.slice(5).toLowerCase()}`;
   if (!modifier && key === "Tab") return "new-child";
-  if (!modifier && key === "Enter") return "new-sibling";
   if (modifier && key.toLowerCase() === "c") return "copy-subtree";
   if (modifier && key.toLowerCase() === "x") return "cut-subtree";
   // Cmd/Ctrl+V is handled by the paste event so external list data remains available.
