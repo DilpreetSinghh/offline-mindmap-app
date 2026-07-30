@@ -18,14 +18,14 @@ export default function PdfExportDialog({ api, onClose }: { api: ExcalidrawImper
         <fieldset>
           <legend>Page layout</legend>
           <label><input type="radio" name="layout" checked={layout === "a4-fit"} onChange={() => setLayout("a4-fit")} /> One-page A4 auto-fit <small>Portrait or landscape automatically</small></label>
-          <label><input type="radio" name="layout" checked={layout === "canvas"} onChange={() => setLayout("canvas")} /> One canvas-sized page</label>
+          <label><input type="radio" name="layout" checked={layout === "canvas"} onChange={() => setLayout("canvas")} /> One canvas-sized page <small>Large drawings are safely scaled to browser limits</small></label>
           <label><input type="radio" name="layout" checked={layout === "a4-tiles"} onChange={() => setLayout("a4-tiles")} /> Tiled A4 pages <small>10 mm margins and 5 mm overlap</small></label>
         </fieldset>
         <fieldset>
           <legend>Content</legend>
           <label><input type="checkbox" checked={selectionOnly} disabled={!hasSelection} onChange={(event) => setSelectionOnly(event.target.checked)} /> Selection only</label>
           <label><input type="checkbox" checked={background} onChange={(event) => setBackground(event.target.checked)} /> Background</label>
-          <label><input type="checkbox" checked={dark} onChange={(event) => setDark(event.target.checked)} /> Dark rendering</label>
+          <label><input type="checkbox" checked={dark} onChange={(event) => setDark(event.target.checked)} /> Dark background and rendering</label>
         </fieldset>
         {error ? <p className="dialog-error" role="alert">{error}</p> : null}
         <footer><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={() => {

@@ -1,6 +1,7 @@
 import { exportToCanvas } from "@excalidraw/excalidraw";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import { pdfBackgroundColour, pdfRasterLimit } from "./pdf-export-policy.mjs";
 
 export type PdfLayout = "a4-fit" | "canvas" | "a4-tiles";
 export type PdfOptions = {
@@ -47,9 +48,20 @@ function exportElements(api: ExcalidrawImperativeAPI, selectionOnly: boolean): r
 
 async function sceneCanvas(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<HTMLCanvasElement> {
   const appState: Partial<AppState> = {
-    ...api.getAppState(), exportBackground: options.background, exportWithDarkMode: options.dark,
+    ...api.getAppState(),
+    exportBackground: options.background,
+    exportWithDarkMode: options.dark,
+    viewBackgroundColor: pdfBackgroundColour(api.getAppState().viewBackgroundColor, options.background, options.dark),
   };
-  return exportToCanvas({ elements: exportElements(api, options.selectionOnly), appState, files: api.getFiles() as BinaryFiles, exportPadding: 0 });
+  return exportToCanvas({
+    elements: exportElements(api, options.selectionOnly),
+    appState,
+    files: api.getFiles() as BinaryFiles,
+    exportPadding: 0,
+    // Browsers refuse to serialise very large canvases. Bound the raster before
+    // converting it to PNG so every PDF layout remains usable on large scenes.
+    maxWidthOrHeight: pdfRasterLimit(options.layout),
+  });
 }
 
 async function canvasPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
@@ -114,6 +126,9 @@ export async function downloadPdf(api: ExcalidrawImperativeAPI, name: string, op
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `${safeName(name)}.pdf`;
+  document.body.appendChild(anchor);
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  anchor.remove();
+  // Safari may not begin consuming the Blob URL until after the click task.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

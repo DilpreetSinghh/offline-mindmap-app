@@ -130,3 +130,17 @@ test("cleaning excludes transient editor state from the content hash", async () 
   const second = await cleanScene(changedSelection);
   assert.equal(first.contentHash, second.contentHash);
 });
+
+test("preserves a large Unicode writing exactly through revision storage", async () => {
+  const db = await database();
+  const drawing = await createDrawing(db, "Long-form writing");
+  const paragraph = "Monetary policy transmission — मुद्रास्फीति, employment, and expectations.\n";
+  const writing = paragraph.repeat(20_000);
+  const revision = await createRevision(db, drawing.id, scene(writing));
+  const restored = await hydrateRevision(db, revision);
+
+  assert.equal(restored.elements[0].text, writing);
+  assert.equal(restored.elements[0].text.length, writing.length);
+  assert.ok(revision.size > 1_000_000);
+  db.close();
+});
