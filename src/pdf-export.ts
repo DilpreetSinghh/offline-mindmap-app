@@ -1,10 +1,11 @@
-import { exportToCanvas } from "@excalidraw/excalidraw";
+import { exportToCanvas, exportToSvg } from "@excalidraw/excalidraw";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import {
   boundedPdfDimensions,
   pdfCanvasPageDimensions,
   pdfExportAppState,
+  pdfVectorPrecision,
   planPdfRaster,
 } from "./pdf-export-policy.mjs";
 
@@ -77,6 +78,25 @@ async function sceneCanvas(api: ExcalidrawImperativeAPI, options: PdfOptions): P
   return { canvas, sourceWidth, sourceHeight };
 }
 
+type SceneSvg = {
+  svg: SVGSVGElement;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+async function sceneSvg(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<SceneSvg> {
+  const svg = await exportToSvg({
+    elements: exportElements(api, options.selectionOnly),
+    appState: pdfExportAppState(api.getAppState(), options.background, options.dark),
+    files: api.getFiles() as BinaryFiles,
+    exportPadding: 0,
+    skipInliningFonts: true,
+  });
+  const viewBox = svg.viewBox.baseVal;
+  if (!viewBox.width || !viewBox.height) throw new Error("There is nothing to export.");
+  return { svg, sourceWidth: viewBox.width, sourceHeight: viewBox.height };
+}
+
 async function canvasPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("Unable to render PDF image.")), "image/png"));
   return blob.arrayBuffer();
@@ -87,25 +107,46 @@ function safeName(name: string): string {
 }
 
 export async function createPdf(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<Uint8Array> {
+  if (options.layout === "canvas" || options.layout === "a4-fit") {
+    const { svg, sourceWidth, sourceHeight } = await sceneSvg(api, options);
+    const [{ jsPDF }] = await Promise.all([import("jspdf"), import("svg2pdf.js")]);
+    let pageWidth: number;
+    let pageHeight: number;
+    let x = 0;
+    let y = 0;
+    let width: number;
+    let height: number;
+    if (options.layout === "canvas") {
+      ({ width: pageWidth, height: pageHeight } = pdfCanvasPageDimensions(sourceWidth, sourceHeight, PX_TO_PT));
+      width = pageWidth;
+      height = pageHeight;
+    } else {
+      const landscape = sourceWidth > sourceHeight;
+      [pageWidth, pageHeight] = landscape ? [A4_PORTRAIT[1], A4_PORTRAIT[0]] : A4_PORTRAIT;
+      const margin = 10 * MM_TO_PT;
+      const scale = Math.min((pageWidth - margin * 2) / sourceWidth, (pageHeight - margin * 2) / sourceHeight);
+      width = sourceWidth * scale;
+      height = sourceHeight * scale;
+      x = (pageWidth - width) / 2;
+      y = (pageHeight - height) / 2;
+    }
+    const pdf = new jsPDF({
+      orientation: pageWidth > pageHeight ? "landscape" : "portrait",
+      unit: "pt",
+      format: [pageWidth, pageHeight],
+      compress: options.quality !== "maximum",
+      precision: pdfVectorPrecision(options.quality),
+      putOnlyUsedFonts: true,
+    });
+    await pdf.svg(svg, { x, y, width, height });
+    return new Uint8Array(pdf.output("arraybuffer"));
+  }
+
   const { canvas, sourceWidth, sourceHeight } = await sceneCanvas(api, options);
   if (!canvas.width || !canvas.height) throw new Error("There is nothing to export.");
   const { PDFDocument } = await import("pdf-lib");
   const pdf = await PDFDocument.create();
-
-  if (options.layout === "canvas") {
-    const { width, height } = pdfCanvasPageDimensions(sourceWidth, sourceHeight, PX_TO_PT);
-    const image = await pdf.embedPng(await canvasPng(canvas));
-    pdf.addPage([width, height]).drawImage(image, { x: 0, y: 0, width, height });
-  } else if (options.layout === "a4-fit") {
-    const landscape = canvas.width > canvas.height;
-    const [pageWidth, pageHeight] = landscape ? [A4_PORTRAIT[1], A4_PORTRAIT[0]] : A4_PORTRAIT;
-    const margin = 10 * MM_TO_PT;
-    const scale = Math.min((pageWidth - margin * 2) / canvas.width, (pageHeight - margin * 2) / canvas.height);
-    const width = canvas.width * scale;
-    const height = canvas.height * scale;
-    const image = await pdf.embedPng(await canvasPng(canvas));
-    pdf.addPage([pageWidth, pageHeight]).drawImage(image, { x: (pageWidth - width) / 2, y: (pageHeight - height) / 2, width, height });
-  } else {
+  {
     const logical = boundedPdfDimensions(sourceWidth, sourceHeight);
     const plan = planA4Tiles(logical.width, logical.height);
     const strideX = plan.tileWidthPx - plan.overlapPx;

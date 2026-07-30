@@ -19,7 +19,9 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm ci
+      - name: Install browser for export acceptance tests
+        run: npx playwright install --with-deps chromium
       - name: Run complete test suite
-        run: npm test
+        run: npm run test:all
       - name: Build production bundle
         run: npm run build

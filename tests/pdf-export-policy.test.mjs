@@ -7,6 +7,7 @@ import {
   boundedPdfDimensions,
   pdfCanvasPageDimensions,
   pdfExportAppState,
+  pdfVectorPrecision,
   planPdfRaster,
 } from "../src/pdf-export-policy.mjs";
 
@@ -28,6 +29,13 @@ test("increases ordinary-scene resolution at high and maximum quality", () => {
   assert.deepEqual(planPdfRaster(1920, 1080, "standard"), { width: 1920, height: 1080, scale: 1 });
   assert.deepEqual(planPdfRaster(1920, 1080, "high"), { width: 3840, height: 2160, scale: 2 });
   assert.deepEqual(planPdfRaster(1920, 1080, "maximum"), { width: 5760, height: 3240, scale: 3 });
+});
+
+test("increases vector precision at each quality level", () => {
+  assert.equal(pdfVectorPrecision("standard"), 4);
+  assert.equal(pdfVectorPrecision("high"), 8);
+  assert.equal(pdfVectorPrecision("maximum"), 12);
+  assert.throws(() => pdfVectorPrecision("unknown"), /Unsupported PDF quality/);
 });
 
 test("keeps canvas page geometry independent from raster quality and within PDF limits", () => {

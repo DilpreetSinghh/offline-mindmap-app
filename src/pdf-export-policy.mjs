@@ -2,10 +2,16 @@ export const DARK_EXPORT_BACKGROUND = "#121212";
 export const MAX_PDF_PAGE_POINTS = 14_400;
 
 export const PDF_QUALITY_PRESETS = Object.freeze({
-  standard: Object.freeze({ scale: 1, maxDimension: 4096, maxPixels: 16_000_000 }),
-  high: Object.freeze({ scale: 2, maxDimension: 8192, maxPixels: 32_000_000 }),
-  maximum: Object.freeze({ scale: 3, maxDimension: 12_288, maxPixels: 64_000_000 }),
+  standard: Object.freeze({ scale: 1, maxDimension: 4096, maxPixels: 16_000_000, vectorPrecision: 4 }),
+  high: Object.freeze({ scale: 2, maxDimension: 8192, maxPixels: 32_000_000, vectorPrecision: 8 }),
+  maximum: Object.freeze({ scale: 3, maxDimension: 12_288, maxPixels: 64_000_000, vectorPrecision: 12 }),
 });
+
+export function pdfVectorPrecision(quality) {
+  const preset = PDF_QUALITY_PRESETS[quality];
+  if (!preset) throw new Error(`Unsupported PDF quality: ${quality}`);
+  return preset.vectorPrecision;
+}
 
 function positiveDimensions(width, height) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {

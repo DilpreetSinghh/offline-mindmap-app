@@ -19,19 +19,19 @@ export default function PdfExportDialog({ api, onClose }: { api: ExcalidrawImper
         <fieldset>
           <legend>Page layout</legend>
           <label><input type="radio" name="layout" checked={layout === "a4-fit"} onChange={() => setLayout("a4-fit")} /> One-page A4 auto-fit <small>Portrait or landscape automatically</small></label>
-          <label><input type="radio" name="layout" checked={layout === "canvas"} onChange={() => setLayout("canvas")} /> One canvas-sized page <small>Large drawings are safely scaled to browser limits</small></label>
+          <label><input type="radio" name="layout" checked={layout === "canvas"} onChange={() => setLayout("canvas")} /> One canvas-sized page <small>Vector text and shapes stay sharp when zoomed</small></label>
           <label><input type="radio" name="layout" checked={layout === "a4-tiles"} onChange={() => setLayout("a4-tiles")} /> Tiled A4 pages <small>10 mm margins and 5 mm overlap</small></label>
         </fieldset>
         <fieldset>
           <legend>Output quality</legend>
           <label>
-            Raster detail
+            PDF quality
             <select value={quality} onChange={(event) => setQuality(event.target.value as PdfQuality)}>
-              <option value="standard">Standard · 1× · up to 16 MP</option>
-              <option value="high">High · 2× · up to 32 MP</option>
-              <option value="maximum">Maximum · 3× · up to 64 MP</option>
+              <option value="standard">Standard · vector · 16 MP raster</option>
+              <option value="high">High · precise vector · 32 MP raster</option>
+              <option value="maximum">Maximum · print vector · 64 MP raster</option>
             </select>
-            <small>Higher quality improves zoom and print sharpness but uses more memory.</small>
+            <small>Text and shapes remain vector-sharp. Higher quality increases geometry precision and embedded-image detail.</small>
           </label>
         </fieldset>
         <fieldset>
