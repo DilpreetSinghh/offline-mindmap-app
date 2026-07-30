@@ -12,6 +12,11 @@ function foldBadge(element) {
   return Boolean(element.customData?.foldBadge);
 }
 
+function attachmentOwner(element) {
+  const value = element.customData?.nodeAttachment;
+  return value && typeof value === "object" ? value.ownerNodeId : null;
+}
+
 /** @param {readonly any[]} elements */
 export function foldingIndex(elements) {
   const nodes = new Map();
@@ -83,6 +88,8 @@ export function visibleFoldedElements(elements) {
     if (element.type === "text" && element.containerId && hiddenShapeIds.has(element.containerId)) return false;
     const connection = connectionData(element);
     if (connection && (index.hiddenNodeIds.has(connection.fromNodeId) || index.hiddenNodeIds.has(connection.toNodeId))) return false;
+    const ownerNodeId = attachmentOwner(element);
+    if (ownerNodeId && index.hiddenNodeIds.has(ownerNodeId)) return false;
     return true;
   });
 }

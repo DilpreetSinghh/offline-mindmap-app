@@ -129,7 +129,7 @@ export function replaceMindmapNodeTexts(
 export function updateMindmapNodeContent(
   elements: readonly OrderedExcalidrawElement[],
   nodeId: string,
-  content: Pick<MindmapNodeData, "notes" | "url" | "internalTargetNodeId" | "task" | "tags">,
+  content: Pick<MindmapNodeData, "notes" | "url" | "internalTargetNodeId" | "task" | "tags" | "icon" | "attachments">,
 ): OrderedExcalidrawElement[] {
   const updatedElements = elements.map((element) => {
     const node = getMindmapNode(element);
@@ -186,11 +186,14 @@ export function reflowMindmapElements(
   });
   const positions = calculateTreeLayout(records, rootNode.nodeId);
   const deltaByElementId = new Map<string, { x: number; y: number }>();
+  const deltaByNodeId = new Map<string, { x: number; y: number }>();
   for (const shape of shapes) {
     const node = getMindmapNode(shape)!;
     const position = positions.get(node.nodeId);
     if (!position) continue;
-    deltaByElementId.set(shape.id, { x: position.x - shape.x, y: position.y - shape.y });
+    const delta = { x: position.x - shape.x, y: position.y - shape.y };
+    deltaByElementId.set(shape.id, delta);
+    deltaByNodeId.set(node.nodeId, delta);
   }
 
   const moved = elements.map((element) => {
@@ -204,6 +207,11 @@ export function reflowMindmapElements(
       const delta = deltaByElementId.get(element.containerId);
       if (!delta || (!delta.x && !delta.y)) return element;
       return newElementWith(element, { x: element.x + delta.x, y: element.y + delta.y }) as OrderedExcalidrawElement;
+    }
+    const ownerNodeId = (element.customData?.nodeAttachment as { ownerNodeId?: string } | undefined)?.ownerNodeId;
+    if (ownerNodeId) {
+      const delta = deltaByNodeId.get(ownerNodeId);
+      if (delta && (delta.x || delta.y)) return newElementWith(element, { x: element.x + delta.x, y: element.y + delta.y }) as OrderedExcalidrawElement;
     }
     return element;
   });
@@ -337,6 +345,8 @@ export function removeMindmapSubtrees(
     if (shapeIds.has(element.id)) return false;
     if (element.type === "text" && element.containerId && shapeIds.has(element.containerId)) return false;
     const connection = getMindmapConnection(element);
+    const ownerNodeId = (element.customData?.nodeAttachment as { ownerNodeId?: string } | undefined)?.ownerNodeId;
+    if (ownerNodeId && wanted.has(ownerNodeId)) return false;
     return !connection || (!wanted.has(connection.fromNodeId) && !wanted.has(connection.toNodeId));
   });
   return reflowMindmapElements(propagateTaskElements(remaining), rootNodeId);

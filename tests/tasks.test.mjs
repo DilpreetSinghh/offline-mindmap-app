@@ -33,3 +33,7 @@ test("formats visible and TaskPaper-compatible task metadata", () => {
   assert.match(taskIndicator(node), /☐ P1 25% ★ OVERDUE #RBI/);
   assert.equal(taskMarkdown("Study", node), "- [ ] Study @priority(1) @due(2020-01-01) @progress(25) @marker(★) #RBI");
 });
+
+test("shows a node icon even when the node is not a task", () => {
+  assert.equal(taskIndicator({ icon: "📈" }), "📈");
+});

@@ -13,7 +13,7 @@ const label = (nodeId, text) => ({ id: `label-${nodeId}`, type: "text", containe
 test("searches titles and future notes, links and tags with filters", () => {
   const scene = [
     shape("root", null), label("root", "Central Idea"),
-    shape("a", "root", true, { notes: "Quarterly finance", tags: [{ name: "RBI", color: "#123456" }], task: { state: "open", priority: 1, dueDate: "2020-01-01" } }), label("a", "Alpha"),
+    shape("a", "root", true, { notes: "Quarterly finance", tags: [{ name: "RBI", color: "#123456" }], icon: "📈", attachments: [{ name: "report.pdf", mimeType: "application/pdf" }], task: { state: "open", priority: 1, dueDate: "2020-01-01" } }), label("a", "Alpha"),
     shape("a1", "a"), label("a1", "Hidden Finance"),
   ];
   const records = buildSearchRecords(scene);
@@ -23,6 +23,8 @@ test("searches titles and future notes, links and tags with filters", () => {
   assert.equal(searchMindmap(records, "", { priority: 1 })[0].nodeId, "a");
   assert.equal(searchMindmap(records, "", { overdue: true })[0].nodeId, "a");
   assert.equal(searchMindmap(records, "", { taskState: "open", tag: "rbi" })[0].nodeId, "a");
+  assert.equal(searchMindmap(records, "growth")[0].nodeId, "a");
+  assert.equal(searchMindmap(records, "report.pdf")[0].nodeId, "a");
   assert.equal(searchMindmap(records, "idea", { caseSensitive: true }).length, 0);
   assert.equal(searchMindmap(records, "Idea", { caseSensitive: true, wholeWord: true }).length, 1);
 });

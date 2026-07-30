@@ -4,9 +4,10 @@ import {
   DefaultSidebar,
   Excalidraw,
   MainMenu,
+  newElementWith,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
+import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import {
   canPasteMindmapText,
@@ -40,8 +41,8 @@ import {
   putLibrary,
   putRecoveryDocument,
 } from "./db";
-import { downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
-import type { DocumentV3, EditorTab } from "./types";
+import { downloadBlob, downloadNativeBackup, exportScene, type ExportFormat } from "./exports";
+import type { DocumentV3, EditorTab, NodeAttachmentMetadata, OfflineAttachmentData } from "./types";
 import SimpleMindmap from "./SimpleMindmap";
 import OutlineView, { outlineMarkdown, taskPaperMarkdown } from "./OutlineView";
 import NodeDetailsDialog from "./NodeDetailsDialog";
@@ -57,13 +58,26 @@ import {
 import "./app.css";
 import { revealFoldedNode, setNodesCollapsed } from "./folding.mjs";
 import { buildSearchRecords, replaceTextMatches, searchMindmap } from "./search-index.mjs";
+import {
+  ATTACHMENT_LIMIT_OPTIONS,
+  DEFAULT_ATTACHMENT_LIMIT_MB,
+  estimateDataUrlBytes,
+  formatBytes,
+  normaliseAttachmentLimit,
+  referencedBinaryFiles,
+  referencedOfflineAttachments,
+  sanitiseSceneMedia,
+} from "./attachments.mjs";
+import { createNodeImage, createOfflineAttachment, dataURLToBlob } from "./media";
 
 const EDITOR_MODE_KEY = "offline-mindmap-editor-mode-v1";
 const SURFACE_MODE_KEY = "offline-mindmap-surface-mode-v1";
+const ATTACHMENT_LIMIT_KEY = "offline-mindmap-attachment-limit-mb-v1";
 const AUTOSAVE_DELAY = 600;
 
 type Status = { message: string; state: "" | "saved" | "error" };
 type SurfaceMode = "simple" | "outline" | "whiteboard";
+type AssetUpdate = { files?: BinaryFiles; attachments?: Record<string, OfflineAttachmentData> };
 
 function detectsMobileUse(): boolean {
   return window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
@@ -72,6 +86,10 @@ function detectsMobileUse(): boolean {
 function readSurfaceOverride(): SurfaceMode | null {
   const stored = localStorage.getItem(SURFACE_MODE_KEY);
   return stored === "simple" || stored === "outline" || stored === "whiteboard" ? stored : null;
+}
+
+function readAttachmentLimit(): number {
+  return normaliseAttachmentLimit(localStorage.getItem(ATTACHMENT_LIMIT_KEY));
 }
 
 function cleanPersistedAppState(appState: Partial<AppState>): Partial<AppState> {
@@ -102,12 +120,15 @@ function cleanPersistedAppState(appState: Partial<AppState>): Partial<AppState> 
 
 function prepareDocument(document: DocumentV3): DocumentV3 {
   const rootless = normaliseRootlessWhiteboard(document.scene.elements, document.rootNodeId);
+  const elements = ensureEditableMindmapElements(rootless.elements);
   return {
     ...document,
+    attachments: referencedOfflineAttachments(elements, document.attachments ?? {}),
     scene: {
       ...document.scene,
-      elements: ensureEditableMindmapElements(rootless.elements),
+      elements,
       appState: cleanPersistedAppState(document.scene.appState),
+      files: referencedBinaryFiles(elements, document.scene.files),
     },
   };
 }
@@ -137,10 +158,11 @@ function currentSceneDocument(tab: EditorTab, api: ExcalidrawImperativeAPI): Doc
   return {
     ...tab.document,
     updatedAt: new Date().toISOString(),
+    attachments: referencedOfflineAttachments(rootless.elements, tab.document.attachments ?? {}),
     scene: {
       elements: rootless.elements,
       appState: cleanPersistedAppState(api.getAppState()),
-      files: api.getFiles(),
+      files: referencedBinaryFiles(rootless.elements, api.getFiles()),
     },
   };
 }
@@ -157,6 +179,7 @@ export default function App() {
   const nameResolverRef = useRef<((value: string | null) => void) | null>(null);
   const surfaceModeRef = useRef<SurfaceMode>("whiteboard");
   const fitWhiteboardOnMountRef = useRef(false);
+  const attachmentLimitRef = useRef(DEFAULT_ATTACHMENT_LIMIT_MB);
 
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeKey, setActiveKey] = useState("");
@@ -182,6 +205,7 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState("");
   const [helpQuery, setHelpQuery] = useState("");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
+  const [attachmentLimitMb, setAttachmentLimitMb] = useState(readAttachmentLimit);
   const [nameRequest, setNameRequest] = useState<{ copy: boolean; value: string } | null>(null);
   const [mobileUse, setMobileUse] = useState(detectsMobileUse);
   const [surfaceOverride, setSurfaceOverride] = useState<SurfaceMode | null>(readSurfaceOverride);
@@ -189,6 +213,7 @@ export default function App() {
 
   const surfaceMode: SurfaceMode = surfaceOverride ?? (mobileUse ? "simple" : "whiteboard");
   surfaceModeRef.current = surfaceMode;
+  attachmentLimitRef.current = attachmentLimitMb;
 
   tabsRef.current = tabs;
   activeKeyRef.current = activeKey;
@@ -465,13 +490,19 @@ export default function App() {
     elements: readonly OrderedExcalidrawElement[],
     selectedNodeId: string,
     message: string,
+    assets: AssetUpdate = {},
   ) => {
     const tab = activeTabRef.current;
     if (!tab) return;
     const document: DocumentV3 = {
       ...tab.document,
       updatedAt: new Date().toISOString(),
-      scene: { ...tab.document.scene, elements },
+      attachments: referencedOfflineAttachments(elements, assets.attachments ?? tab.document.attachments ?? {}),
+      scene: {
+        ...tab.document.scene,
+        elements,
+        files: referencedBinaryFiles(elements, assets.files ?? tab.document.scene.files),
+      },
     };
     const validation = validateDocument(document);
     if (!validation.valid) {
@@ -529,12 +560,19 @@ export default function App() {
     );
   }, [applySimpleElements]);
 
-  const applyOutlineElements = useCallback((elements: readonly OrderedExcalidrawElement[], selectedNodeId: string, message: string) => {
-    applySimpleElements(elements, selectedNodeId, message);
+  const applyOutlineElements = useCallback((
+    elements: readonly OrderedExcalidrawElement[],
+    selectedNodeId: string,
+    message: string,
+    assets: AssetUpdate = {},
+    addedFiles: BinaryFileData[] = [],
+  ) => {
+    applySimpleElements(elements, selectedNodeId, message, assets);
     const api = apiRef.current;
     if (!api) return;
     const shape = elements.find((element) => getMindmapNode(element)?.nodeId === selectedNodeId);
     semanticUpdateRef.current = true;
+    if (addedFiles.length) api.addFiles(addedFiles);
     api.updateScene({ elements: projectFoldedElements(elements), appState: shape ? { selectedElementIds: { [shape.id]: true } } : undefined, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     semanticUpdateRef.current = false;
   }, [applySimpleElements]);
@@ -599,7 +637,7 @@ export default function App() {
     announce("Tasks exported as Markdown with TaskPaper metadata.");
   }, [announce]);
 
-  const applyNodeDetails = useCallback((content: Pick<NonNullable<ReturnType<typeof getMindmapNode>>, "notes" | "url" | "internalTargetNodeId" | "task" | "tags">) => {
+  const applyNodeDetails = useCallback((content: Pick<NonNullable<ReturnType<typeof getMindmapNode>>, "notes" | "url" | "internalTargetNodeId" | "task" | "tags" | "icon">) => {
     const tab = activeTabRef.current;
     if (!tab) return;
     applyOutlineElements(
@@ -609,6 +647,116 @@ export default function App() {
     );
     setDetailsOpen(false);
   }, [applyOutlineElements, simpleSelectedNodeId]);
+
+  const addNodeImage = useCallback(async (file: File) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const shape = tab.document.scene.elements.find((element) => getMindmapNode(element)?.nodeId === simpleSelectedNodeId);
+    const node = shape && getMindmapNode(shape);
+    if (!shape || !node) {
+      announce("Select a mind-map node before adding an image.", "error");
+      return;
+    }
+    try {
+      const created = await createNodeImage(file, shape, node.nodeId, attachmentLimitRef.current);
+      const elements = updateMindmapNodeContent(
+        [...tab.document.scene.elements, created.element],
+        node.nodeId,
+        { attachments: [...(node.attachments ?? []), created.metadata] },
+      );
+      const files = { ...tab.document.scene.files, [created.file.id]: created.file } as BinaryFiles;
+      applyOutlineElements(elements, node.nodeId, `Attached image ${file.name}.`, { files }, [created.file]);
+    } catch (error) {
+      announce(`Image not added: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  }, [announce, applyOutlineElements, simpleSelectedNodeId]);
+
+  const replaceNodeImage = useCallback(async (attachment: NodeAttachmentMetadata, file: File) => {
+    const tab = activeTabRef.current;
+    if (!tab || attachment.kind !== "image" || !attachment.elementId) return;
+    const nodeShape = tab.document.scene.elements.find((element) => getMindmapNode(element)?.nodeId === simpleSelectedNodeId);
+    const image = tab.document.scene.elements.find((element) => element.id === attachment.elementId && element.type === "image");
+    const node = nodeShape && getMindmapNode(nodeShape);
+    if (!nodeShape || !image || image.type !== "image" || !node) {
+      announce("The node image could not be found for replacement.", "error");
+      return;
+    }
+    try {
+      const created = await createNodeImage(file, nodeShape, node.nodeId, attachmentLimitRef.current);
+      const replacementMetadata: NodeAttachmentMetadata = {
+        ...created.metadata,
+        id: attachment.id,
+        elementId: attachment.elementId,
+      };
+      const replaced = tab.document.scene.elements.map((element) => element.id === image.id
+        ? newElementWith(image, {
+          fileId: created.file.id,
+          width: created.element.width,
+          height: created.element.height,
+          status: "saved",
+          customData: {
+            ...image.customData,
+            nodeAttachment: { attachmentId: attachment.id, ownerNodeId: node.nodeId, name: file.name, size: file.size, mimeType: file.type },
+          },
+        }) as OrderedExcalidrawElement
+        : element);
+      const elements = updateMindmapNodeContent(replaced, node.nodeId, {
+        attachments: (node.attachments ?? []).map((item) => item.id === attachment.id ? replacementMetadata : item),
+      });
+      const files = { ...tab.document.scene.files, [created.file.id]: created.file } as BinaryFiles;
+      applyOutlineElements(elements, node.nodeId, `Replaced image with ${file.name}.`, { files }, [created.file]);
+    } catch (error) {
+      announce(`Image not replaced: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  }, [announce, applyOutlineElements, simpleSelectedNodeId]);
+
+  const addNodeAttachment = useCallback(async (file: File) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const node = tab.document.scene.elements.map(getMindmapNode).find((item) => item?.nodeId === simpleSelectedNodeId);
+    if (!node) {
+      announce("Select a mind-map node before attaching a file.", "error");
+      return;
+    }
+    try {
+      const created = await createOfflineAttachment(file, attachmentLimitRef.current);
+      const elements = updateMindmapNodeContent(tab.document.scene.elements, node.nodeId, {
+        attachments: [...(node.attachments ?? []), created.metadata],
+      });
+      const attachments = { ...(tab.document.attachments ?? {}), [created.data.id]: created.data };
+      applyOutlineElements(elements, node.nodeId, `Attached file ${file.name}.`, { attachments });
+    } catch (error) {
+      announce(`File not attached: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  }, [announce, applyOutlineElements, simpleSelectedNodeId]);
+
+  const removeNodeAttachment = useCallback((attachment: NodeAttachmentMetadata) => {
+    const tab = activeTabRef.current;
+    if (!tab) return;
+    const node = tab.document.scene.elements.map(getMindmapNode).find((item) => item?.nodeId === simpleSelectedNodeId);
+    if (!node) return;
+    const withoutImage = attachment.kind === "image" && attachment.elementId
+      ? tab.document.scene.elements.filter((element) => element.id !== attachment.elementId)
+      : tab.document.scene.elements;
+    const elements = updateMindmapNodeContent(withoutImage, node.nodeId, {
+      attachments: (node.attachments ?? []).filter((item) => item.id !== attachment.id),
+    });
+    applyOutlineElements(elements, node.nodeId, `Removed ${attachment.name}.`);
+  }, [applyOutlineElements, simpleSelectedNodeId]);
+
+  const downloadNodeAttachment = useCallback((attachment: NodeAttachmentMetadata) => {
+    const data = activeTabRef.current?.document.attachments?.[attachment.id];
+    if (!data) {
+      announce("The local attachment data is missing.", "error");
+      return;
+    }
+    try {
+      downloadBlob(dataURLToBlob(data.dataURL), data.name);
+      announce(`Downloaded ${data.name}.`);
+    } catch (error) {
+      announce(`Attachment download failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  }, [announce]);
 
   const openNodeDetails = useCallback(() => {
     const api = apiRef.current;
@@ -628,7 +776,9 @@ export default function App() {
       if (!tab || !api || semanticUpdateRef.current) return;
       const merged = mergeFoldedScene(tab.document.scene.elements, elements);
       const rootless = normaliseRootlessWhiteboard(merged, tab.document.rootNodeId);
-      const normalised = normaliseConnectionBindings(rootless.elements);
+      const media = sanitiseSceneMedia(rootless.elements, files, attachmentLimitRef.current);
+      if (media.pending) return;
+      const normalised = normaliseConnectionBindings(media.elements);
       if (normalised.errors.length) {
         semanticUpdateRef.current = true;
         api.updateScene({ elements: lastValidElementsRef.current, captureUpdate: CaptureUpdateAction.NEVER });
@@ -639,7 +789,8 @@ export default function App() {
       const document: DocumentV3 = {
         ...tab.document,
         updatedAt: new Date().toISOString(),
-        scene: { elements: normalised.elements, appState: cleanPersistedAppState(appState), files },
+        attachments: referencedOfflineAttachments(normalised.elements, tab.document.attachments ?? {}),
+        scene: { elements: normalised.elements, appState: cleanPersistedAppState(appState), files: media.files },
       };
       const validation = validateDocument(document);
       if (!validation.valid) {
@@ -650,13 +801,14 @@ export default function App() {
         return;
       }
       lastValidElementsRef.current = projectFoldedElements(normalised.elements);
-      if (rootless.changed || normalised.changed) {
+      if (rootless.changed || normalised.changed || media.errors.length) {
         semanticUpdateRef.current = true;
         api.updateScene({ elements: projectFoldedElements(normalised.elements), captureUpdate: CaptureUpdateAction.NEVER });
         semanticUpdateRef.current = false;
       }
       activeTabRef.current = { ...tab, document };
       scheduleRecovery(document);
+      if (media.errors.length) announce(media.errors[0], "error");
     },
     [announce, scheduleRecovery],
   );
@@ -737,7 +889,7 @@ export default function App() {
   const restoreBackup = useCallback(
     async (file: File) => {
       try {
-        if (file.size > 50 * 1024 * 1024) throw new Error("Backup exceeds the 50 MB local limit.");
+        if (file.size > 200 * 1024 * 1024) throw new Error("Backup exceeds the 200 MB local limit.");
         const parsed = JSON.parse(await file.text()) as { format?: string; schemaVersion?: number; documents?: DocumentV3[] };
         if (parsed.format !== "offline-mindmap-native-backup" || parsed.schemaVersion !== 3 || !Array.isArray(parsed.documents)) {
           throw new Error("Unsupported native backup format.");
@@ -858,6 +1010,10 @@ export default function App() {
       </main>
     );
   }
+
+  const localAssetCount = Object.keys(activeTab.document.scene.files).length + Object.keys(activeTab.document.attachments ?? {}).length;
+  const localAssetBytes = Object.values(activeTab.document.scene.files).reduce((total, file) => total + estimateDataUrlBytes(file.dataURL), 0)
+    + Object.values(activeTab.document.attachments ?? {}).reduce((total, attachment) => total + attachment.size, 0);
 
   return (
     <main className="app-shell">
@@ -989,6 +1145,13 @@ export default function App() {
               <option value="png">PNG image</option><option value="svg">SVG vector</option><option value="pdf">PDF document</option>
               <option value="excalidraw">Native Excalidraw JSON</option><option value="clipboard">Copy PNG to clipboard</option>
             </select></label>
+            <label>Attachment limit<select value={attachmentLimitMb} onChange={(event) => {
+              const limit = normaliseAttachmentLimit(event.target.value);
+              localStorage.setItem(ATTACHMENT_LIMIT_KEY, String(limit));
+              setAttachmentLimitMb(limit);
+              announce(`Local attachment limit set to ${limit} MB.`);
+            }}>{ATTACHMENT_LIMIT_OPTIONS.map((limit) => <option value={limit} key={limit}>{limit} MB per file</option>)}</select></label>
+            <div className="asset-summary"><strong>{localAssetCount} local asset{localAssetCount === 1 ? "" : "s"}</strong><span>{formatBytes(localAssetBytes)} in this map</span></div>
             <button type="button" className="export-button" onClick={() => void runExport()}>Export {exportFormat === "clipboard" ? "to clipboard" : exportFormat.toUpperCase()}</button>
             <div className="privacy-card"><span>●</span><div><strong>Private by design</strong><p>No cloud, telemetry or CDN requests.</p></div></div>
             <small>Build {__SOURCE_SHA__.slice(0, 8)}</small>
@@ -1079,7 +1242,13 @@ export default function App() {
       {detailsOpen ? <NodeDetailsDialog
         elements={activeTab.document.scene.elements}
         nodeId={simpleSelectedNodeId}
+        attachmentLimitMb={attachmentLimitMb}
         onApply={applyNodeDetails}
+        onAddImage={addNodeImage}
+        onReplaceImage={replaceNodeImage}
+        onAddAttachment={addNodeAttachment}
+        onRemoveAttachment={removeNodeAttachment}
+        onDownloadAttachment={downloadNodeAttachment}
         onClose={() => setDetailsOpen(false)}
         announce={announce}
       /> : null}

@@ -19,6 +19,8 @@ type SimpleNode = {
   internalTargetNodeId?: string;
   task?: MindmapNodeData["task"];
   tags?: MindmapNodeData["tags"];
+  icon?: string;
+  attachments?: MindmapNodeData["attachments"];
 };
 
 type SimpleMindmapProps = {
@@ -73,8 +75,8 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
     setDraft(next);
     if (next !== node.text) onRename(node.nodeId, next);
   };
-  const taskText = taskIndicator({ task: node.task, tags: [] });
-  const hasIndicators = Boolean(node.notes || node.url || node.internalTargetNodeId || taskText || node.tags?.length);
+  const taskText = taskIndicator({ icon: node.icon, task: node.task, tags: [] });
+  const hasIndicators = Boolean(node.notes || node.url || node.internalTargetNodeId || taskText || node.tags?.length || node.attachments?.length);
   return (
     <article
       id={`simple-node-${node.nodeId}`}
@@ -99,6 +101,7 @@ const SimpleNodeRow = memo(function SimpleNodeRow({
           {hasIndicators ? <small className={isTaskOverdue(node.task) ? "simple-content-indicators overdue" : "simple-content-indicators"}>
             {taskText ? <b>{taskText}</b> : null}
             {(node.tags ?? []).map((tag, index) => <em key={`${tagName(tag)}-${index}`} style={{ backgroundColor: tagColor(tag) }}>#{tagName(tag)}</em>)}
+            {node.attachments?.length ? <span>{node.attachments.length} attachment{node.attachments.length === 1 ? "" : "s"}</span> : null}
             {node.notes ? <span>Note</span> : null}{node.url ? <span>Link</span> : null}{node.internalTargetNodeId ? <span>Topic</span> : null}
           </small> : null}
         </label>

@@ -367,6 +367,7 @@ export function validateDocument(document: DocumentV3): DocumentValidation {
 
   const nodes = new Map<string, MindmapNodeData>();
   const elementIds = new Set<string>();
+  const attachmentIds = new Set<string>();
   for (const element of document?.scene?.elements ?? []) {
     if (element.isDeleted) continue;
     if (elementIds.has(element.id)) errors.push(`Duplicate element ID: ${element.id}`);
@@ -392,8 +393,45 @@ export function validateDocument(document: DocumentV3): DocumentValidation {
         if (!valid) errors.push(`Invalid tag: ${node.nodeId}`);
       }
     }
+    if (node.icon !== undefined && (typeof node.icon !== "string" || node.icon.length > 16)) errors.push(`Invalid node icon: ${node.nodeId}`);
+    if (node.attachments !== undefined) {
+      if (!Array.isArray(node.attachments)) errors.push(`Invalid attachments: ${node.nodeId}`);
+      else for (const attachment of node.attachments) {
+        const valid = attachment
+          && typeof attachment.id === "string"
+          && (attachment.kind === "image" || attachment.kind === "file")
+          && typeof attachment.name === "string"
+          && typeof attachment.mimeType === "string"
+          && Number.isFinite(attachment.size)
+          && attachment.size >= 0
+          && typeof attachment.createdAt === "string";
+        if (!valid || attachmentIds.has(attachment.id)) errors.push(`Invalid or duplicate attachment: ${node.nodeId}`);
+        else attachmentIds.add(attachment.id);
+      }
+    }
   }
   if (nodes.size) errors.push(...validateHierarchyIndex([...nodes.values()], document?.rootNodeId).errors);
+
+  const imageById = new Map((document?.scene?.elements ?? []).flatMap((element) => element.type === "image" ? [[element.id, element] as const] : []));
+  for (const node of nodes.values()) {
+    for (const attachment of node.attachments ?? []) {
+      if (attachment.kind === "file") {
+        const data = document.attachments?.[attachment.id];
+        if (!data || data.id !== attachment.id || !String(data.dataURL).startsWith("data:")) errors.push(`Attachment data is missing: ${attachment.name}`);
+      } else {
+        const image = attachment.elementId ? imageById.get(attachment.elementId) : undefined;
+        if (!image || !image.fileId || image.fileId !== attachment.fileId || !document.scene.files?.[image.fileId]) errors.push(`Node image data is missing: ${attachment.name}`);
+      }
+    }
+  }
+  for (const [id, attachment] of Object.entries(document.attachments ?? {})) {
+    if (attachment.id !== id || !attachmentIds.has(id) || !attachment.dataURL.startsWith("data:")) errors.push(`Orphaned or invalid attachment data: ${id}`);
+  }
+  for (const image of imageById.values()) {
+    if (image.fileId && !document.scene.files?.[image.fileId]) errors.push(`Image ${image.id} refers to missing local data.`);
+    const owner = image.customData?.nodeAttachment as { attachmentId?: string; ownerNodeId?: string } | undefined;
+    if (owner && (!owner.ownerNodeId || !nodes.has(owner.ownerNodeId) || !owner.attachmentId || !attachmentIds.has(owner.attachmentId))) errors.push(`Node image ${image.id} has invalid ownership metadata.`);
+  }
 
   const hierarchyParents = new Map<string, number>();
   for (const element of document?.scene?.elements ?? []) {

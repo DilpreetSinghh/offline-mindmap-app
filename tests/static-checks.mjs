@@ -14,6 +14,8 @@ const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.
 const outlineView = await readFile(new URL("../src/OutlineView.tsx", import.meta.url), "utf8");
 const nodeDetails = await readFile(new URL("../src/NodeDetailsDialog.tsx", import.meta.url), "utf8");
 const taskHelpers = await readFile(new URL("../src/tasks.mjs", import.meta.url), "utf8");
+const attachments = await readFile(new URL("../src/attachments.mjs", import.meta.url), "utf8");
+const media = await readFile(new URL("../src/media.ts", import.meta.url), "utf8");
 const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
   (match) => match[1]
 );
@@ -70,6 +72,18 @@ assert.match(betaApp, /Overdue only/, "Search must expose an overdue task filter
 assert.match(betaApp, /onExportTasks=\{exportTasks\}/, "Outline must expose task export");
 assert.match(simpleMindmap, /taskIndicator/, "Simple mode must show task state without opening details");
 assert.match(taskHelpers, /propagateTaskRecords/, "Automatic parent progress must be persisted in canonical node records");
+assert.match(nodeDetails, /Search offline icons/, "The node editor must expose a searchable offline icon catalogue");
+assert.match(nodeDetails, /Add node image/, "The node editor must expose explicit image attachment");
+assert.match(nodeDetails, /Attach file/, "The node editor must support offline file attachments");
+assert.match(betaApp, /Attachment limit/, "The app must expose a configurable per-file attachment limit");
+assert.match(betaApp, /sanitiseSceneMedia/, "Picker, drop, and clipboard images must pass through local validation");
+assert.match(betaDatabase, /documentWithoutAssetPayloads/, "Large asset payloads must be separated from document records");
+assert.match(betaDatabase, /replaceAssetRecords/, "Deleted attachments must clear stale IndexedDB asset records on save");
+assert.match(betaDatabase, /hydrateDocument/, "IndexedDB reads must restore separated image and attachment payloads");
+assert.match(betaExports, /referencedBinaryFiles/, "Image exports must include only referenced local binaries");
+assert.match(betaDocument, /Attachment data is missing/, "Native schema validation must reject broken attachment references");
+assert.match(media, /URL\.revokeObjectURL\(url\)/, "Image metadata probing must revoke object URLs");
+assert.match(attachments, /validateImageFile/, "Unsupported and oversized images must fail through a tested validator");
 assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
 assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
 assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
@@ -77,6 +91,7 @@ assert.match(betaDocument, /if \(nodes\.size\)/, "Whiteboard-only documents must
 assert.match(betaApp, /mergeFoldedScene\(tab\.document\.scene\.elements, api\.getSceneElements\(\)\)[\s\S]*normaliseRootlessWhiteboard\(merged, tab\.document\.rootNodeId\)/, "Local save must merge folded content and normalise a deleted-root scene before validation");
 assert.match(betaCommands, /Selected shape is now the root mind-map node/, "A selected whiteboard shape must be promotable to a replacement root");
 assert.match(betaCommands, /offline-mindmap-subtree/, "Subtree clipboard data must use an explicit versioned format");
+assert.match(betaCommands, /delete copiedData\.attachments/, "Subtree copies must not retain broken local attachment references");
 assert.match(betaCommands, /appendStyledConnection/, "Subtree paste must restore internal styled connections");
 assert.match(betaCommands, /removeMindmapSubtrees/, "Bulk deletion must remove selected branches in one transaction");
 assert.match(betaApp, /addEventListener\("paste"/, "External Markdown and plain-text lists must be handled from the paste event");

@@ -1,5 +1,6 @@
 import { foldingIndex, nodeDepths } from "./folding.mjs";
 import { isTaskOverdue, tagName } from "./tasks.mjs";
+import { builtInIconName } from "./icons.mjs";
 
 function nodeData(element) {
   const value = element.customData?.mindmapNode;
@@ -33,7 +34,7 @@ export function buildSearchRecords(elements) {
       nodeId: node.nodeId,
       elementId: element.id,
       title,
-      searchText: [title, notes, link, ...tags].join("\n"),
+      searchText: [title, notes, link, node.icon ?? "", builtInIconName(node.icon), ...tags, ...(node.attachments ?? []).map((attachment) => `${attachment.name} ${attachment.mimeType}`)].join("\n"),
       depth: depths.get(node.nodeId) ?? 0,
       hidden: hidden.has(node.nodeId),
       tags,

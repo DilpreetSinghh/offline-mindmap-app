@@ -218,8 +218,10 @@ function collectSubtree(context: CommandContext): SubtreeClipboard | null {
     const data = getMindmapNode(element);
     if (!data || !wanted.has(data.nodeId)) return [];
     const label = elements.find((candidate) => candidate.type === "text" && candidate.containerId === element.id) ?? null;
+    const copiedData = structuredClone(data);
+    delete copiedData.attachments;
     return [{
-      data: structuredClone(data),
+      data: copiedData,
       text: getNodeText(elements, element.id),
       x: element.x,
       y: element.y,

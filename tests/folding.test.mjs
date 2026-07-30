@@ -31,6 +31,18 @@ test("folding hides descendants, their labels and connections but preserves whit
   ]);
 });
 
+test("folding hides and restores images owned by hidden nodes", () => {
+  const scene = [
+    shape("root", null, true),
+    shape("child", "root"),
+    { id: "image-child", type: "image", fileId: "file-child", customData: { nodeAttachment: { ownerNodeId: "child" } } },
+  ];
+  const visible = visibleFoldedElements(scene);
+  assert.equal(visible.some((element) => element.id === "image-child"), false);
+  const merged = mergeFoldedElements(scene, visible);
+  assert.equal(merged.some((element) => element.id === "image-child"), true);
+});
+
 test("merging projected edits keeps hidden canonical descendants and removes deleted visible elements", () => {
   const projected = visibleFoldedElements(scene)
     .filter((element) => element.id !== "shape-b" && element.id !== "label-b" && element.id !== "arrow-root-b")

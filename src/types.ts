@@ -4,6 +4,26 @@ import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/ty
 export const DOCUMENT_FORMAT = "offline-mindmap-document";
 export const DOCUMENT_SCHEMA_VERSION = 3;
 
+export type NodeAttachmentMetadata = {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  elementId?: string;
+  fileId?: string;
+};
+
+export type OfflineAttachmentData = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  dataURL: string;
+};
+
 export type MindmapNodeData = {
   nodeId: string;
   parentNodeId: string | null;
@@ -21,6 +41,8 @@ export type MindmapNodeData = {
     autoProgress?: boolean;
   };
   tags?: Array<string | { name: string; color: string }>;
+  icon?: string;
+  attachments?: NodeAttachmentMetadata[];
 };
 
 export type MindmapConnectionData = {
@@ -37,6 +59,7 @@ export type DocumentV3 = {
   createdAt: string;
   updatedAt: string;
   rootNodeId: string;
+  attachments?: Record<string, OfflineAttachmentData>;
   scene: {
     elements: readonly OrderedExcalidrawElement[];
     appState: Partial<AppState>;

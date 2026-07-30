@@ -1,6 +1,6 @@
 import type { BinaryFileData, BinaryFiles } from "@excalidraw/excalidraw/types";
 import { assertValidDocument, compareMigration, migrateLegacyState } from "./document";
-import type { DocumentV3, LegacyMap, LegacyState } from "./types";
+import type { DocumentV3, LegacyMap, LegacyState, OfflineAttachmentData } from "./types";
 
 const DB_NAME = "offline-mindmap-v3";
 const DB_VERSION = 1;
@@ -12,7 +12,9 @@ const MIGRATION_KEY = "schema-2-migration-complete";
 const LEGACY_MAPS_KEY = "offline-mindmap-maps-v1";
 const LEGACY_WORKSPACE_KEY = "offline-mindmap-workspace-v2";
 
-type AssetRecord = BinaryFileData & { documentId: string };
+type BinaryAssetRecord = BinaryFileData & { documentId: string; assetKind?: "binary" };
+type OfflineAssetRecord = OfflineAttachmentData & { documentId: string; assetKind: "attachment" };
+type AssetRecord = BinaryAssetRecord | OfflineAssetRecord;
 type MetaRecord = { key: string; value: unknown };
 
 function requestValue<T>(request: IDBRequest<T>): Promise<T> {
@@ -44,18 +46,60 @@ export async function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-function assetRecords(documentId: string, files: BinaryFiles): AssetRecord[] {
-  return Object.values(files).map((file) => ({ ...file, documentId }));
+function assetRange(documentId: string): IDBKeyRange {
+  return IDBKeyRange.bound([documentId, ""], [documentId, "\uffff"]);
+}
+
+function assetRecords(document: DocumentV3): AssetRecord[] {
+  const files = Object.values(document.scene.files).map((file) => ({ ...file, documentId: document.id, assetKind: "binary" as const }));
+  const attachments = Object.values(document.attachments ?? {}).map((attachment) => ({ ...attachment, documentId: document.id, assetKind: "attachment" as const }));
+  return [...files, ...attachments];
+}
+
+function documentWithoutAssetPayloads(document: DocumentV3): DocumentV3 {
+  return {
+    ...document,
+    attachments: {},
+    scene: { ...document.scene, files: {} },
+  };
+}
+
+function hydrateDocument(document: DocumentV3, records: AssetRecord[]): DocumentV3 {
+  const files: BinaryFiles = { ...document.scene.files };
+  const attachments: Record<string, OfflineAttachmentData> = { ...(document.attachments ?? {}) };
+  for (const record of records) {
+    const { documentId: _documentId, assetKind, ...data } = record;
+    if (assetKind === "attachment") attachments[record.id] = data as OfflineAttachmentData;
+    else files[record.id] = data as BinaryFileData;
+  }
+  return { ...document, attachments, scene: { ...document.scene, files } };
+}
+
+function replaceAssetRecords(store: IDBObjectStore, document: DocumentV3): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = store.openCursor(assetRange(document.id));
+    request.onerror = () => reject(request.error ?? new Error("Unable to replace local attachment records."));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+        return;
+      }
+      for (const record of assetRecords(document)) store.put(record);
+      resolve();
+    };
+  });
 }
 
 export async function putDocument(document: DocumentV3): Promise<DocumentV3> {
   assertValidDocument(document);
   const database = await openDatabase();
   const transaction = database.transaction([DOCUMENT_STORE, ASSET_STORE], "readwrite");
-  transaction.objectStore(DOCUMENT_STORE).put(structuredClone(document));
-  const assets = transaction.objectStore(ASSET_STORE);
-  for (const record of assetRecords(document.id, document.scene.files)) assets.put(record);
-  await transactionDone(transaction);
+  const done = transactionDone(transaction);
+  transaction.objectStore(DOCUMENT_STORE).put(structuredClone(documentWithoutAssetPayloads(document)));
+  await replaceAssetRecords(transaction.objectStore(ASSET_STORE), document);
+  await done;
   const saved = await getDocument(document.id);
   if (!saved) throw new Error("Local save verification failed.");
   assertValidDocument(saved);
@@ -66,13 +110,14 @@ export async function putDocuments(documents: DocumentV3[]): Promise<DocumentV3[
   for (const document of documents) assertValidDocument(document);
   const database = await openDatabase();
   const transaction = database.transaction([DOCUMENT_STORE, ASSET_STORE], "readwrite");
+  const done = transactionDone(transaction);
   const documentStore = transaction.objectStore(DOCUMENT_STORE);
   const assetStore = transaction.objectStore(ASSET_STORE);
   for (const document of documents) {
-    documentStore.put(structuredClone(document));
-    for (const record of assetRecords(document.id, document.scene.files)) assetStore.put(record);
+    documentStore.put(structuredClone(documentWithoutAssetPayloads(document)));
   }
-  await transactionDone(transaction);
+  await Promise.all(documents.map((document) => replaceAssetRecords(assetStore, document)));
+  await done;
   const verified = await Promise.all(documents.map((document) => getDocument(document.id)));
   for (const document of verified) {
     if (!document) throw new Error("Native backup read-back verification failed.");
@@ -83,16 +128,25 @@ export async function putDocuments(documents: DocumentV3[]): Promise<DocumentV3[
 
 export async function getDocument(id: string): Promise<DocumentV3 | null> {
   const database = await openDatabase();
-  const transaction = database.transaction(DOCUMENT_STORE, "readonly");
-  const value = await requestValue(transaction.objectStore(DOCUMENT_STORE).get(id));
-  return (value as DocumentV3 | undefined) ?? null;
+  const transaction = database.transaction([DOCUMENT_STORE, ASSET_STORE], "readonly");
+  const [value, records] = await Promise.all([
+    requestValue(transaction.objectStore(DOCUMENT_STORE).get(id)),
+    requestValue(transaction.objectStore(ASSET_STORE).getAll(assetRange(id))),
+  ]);
+  const document = value as DocumentV3 | undefined;
+  return document ? hydrateDocument(document, records as AssetRecord[]) : null;
 }
 
 export async function listDocuments(): Promise<DocumentV3[]> {
   const database = await openDatabase();
-  const transaction = database.transaction(DOCUMENT_STORE, "readonly");
-  const values = (await requestValue(transaction.objectStore(DOCUMENT_STORE).getAll())) as DocumentV3[];
-  return values.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const transaction = database.transaction([DOCUMENT_STORE, ASSET_STORE], "readonly");
+  const [values, assets] = await Promise.all([
+    requestValue(transaction.objectStore(DOCUMENT_STORE).getAll()),
+    requestValue(transaction.objectStore(ASSET_STORE).getAll()),
+  ]) as [DocumentV3[], AssetRecord[]];
+  const assetsByDocument = new Map<string, AssetRecord[]>();
+  for (const record of assets) assetsByDocument.set(record.documentId, [...(assetsByDocument.get(record.documentId) ?? []), record]);
+  return values.map((document) => hydrateDocument(document, assetsByDocument.get(document.id) ?? [])).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function putRecoveryDocument(document: DocumentV3): Promise<void> {

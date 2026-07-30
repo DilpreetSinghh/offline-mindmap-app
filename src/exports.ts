@@ -6,6 +6,7 @@ import {
 } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { DocumentV3 } from "./types";
+import { referencedBinaryFiles } from "./attachments.mjs";
 
 export type ExportFormat = "png" | "svg" | "pdf" | "clipboard" | "excalidraw";
 export type ExportOutcome = "created" | "clipboard-download-fallback";
@@ -24,10 +25,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 function exportState(api: ExcalidrawImperativeAPI) {
+  const elements = api.getSceneElements();
   return {
-    elements: api.getSceneElements(),
+    elements,
     appState: { ...api.getAppState(), exportBackground: true, exportWithDarkMode: false },
-    files: api.getFiles(),
+    files: referencedBinaryFiles(elements, api.getFiles()),
   };
 }
 

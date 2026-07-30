@@ -6,7 +6,7 @@ import type { OutlineMove } from "./mindmap-operations";
 import { isTaskOverdue, tagColor, tagName, taskMarkdown } from "./tasks.mjs";
 import type { MindmapNodeData } from "./types";
 
-type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: NonNullable<MindmapNodeData["tags"]>; task?: MindmapNodeData["task"]; notes: string; url: string; internalTargetNodeId: string };
+type Row = { nodeId: string; parentNodeId: string | null; siblingOrder: number; depth: number; title: string; collapsed: boolean; childCount: number; hiddenCount: number; tags: NonNullable<MindmapNodeData["tags"]>; task?: MindmapNodeData["task"]; icon: string; attachments: NonNullable<MindmapNodeData["attachments"]>; notes: string; url: string; internalTargetNodeId: string };
 type Props = { elements: readonly OrderedExcalidrawElement[]; rootNodeId: string; selectedNodeId: string; onSelect: (id: string) => void; onRename: (id: string, value: string) => void; onMove: (id: string, move: OutlineMove) => void; onDelete: (id: string) => void; onToggleFold: (id: string) => void; onExport: () => void; onExportTasks: () => void };
 const ROW_HEIGHT = 54;
 
@@ -15,7 +15,7 @@ export function rowsFromElements(elements: readonly OrderedExcalidrawElement[], 
   const nodes = elements.flatMap((element) => {
     const data = getMindmapNode(element);
     if (!data) return [];
-    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: data.tags ?? [], notes: data.notes ?? "", url: data.url ?? "", internalTargetNodeId: data.internalTargetNodeId ?? "" }];
+    return [{ ...data, elementId: element.id, title: titles.get(element.id) ?? "Untitled node", tags: data.tags ?? [], icon: data.icon ?? "", attachments: data.attachments ?? [], notes: data.notes ?? "", url: data.url ?? "", internalTargetNodeId: data.internalTargetNodeId ?? "" }];
   });
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const children = new Map<string | null, typeof nodes>();
@@ -67,7 +67,7 @@ const OutlineRow = memo(function OutlineRow({ row, selected, rootNodeId, onSelec
   return <div className={selected ? "outline-row selected" : "outline-row"} style={{ "--outline-depth": row.depth } as CSSProperties} data-node-id={row.nodeId} onClick={() => onSelect(row.nodeId)} onKeyDown={(event) => onKey(event, row.nodeId)}>
     <button className="outline-fold" type="button" disabled={!row.childCount} aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`} onClick={(event) => { event.stopPropagation(); onToggleFold(row.nodeId); }}>{row.childCount ? row.collapsed ? "▸" : "▾" : "·"}</button>
     <input value={draft} aria-label={`Outline title ${row.title}`} onFocus={() => onSelect(row.nodeId)} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); onKey(event, row.nodeId); }} />
-    <span className={isTaskOverdue(row.task) ? "outline-meta overdue" : "outline-meta"}>{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.task ? <b>{row.task.state === "done" ? "☑" : "☐"}{row.task.priority ? ` P${row.task.priority}` : ""}{row.task.progress != null ? ` ${row.task.progress}%` : ""}{row.task.dueDate ? ` · ${row.task.dueDate}` : ""}{row.task.marker ? ` ${row.task.marker}` : ""}</b> : null}{row.tags.map((tag, index) => <em key={`${tagName(tag)}-${index}`} style={{ backgroundColor: tagColor(tag) }}>#{tagName(tag)}</em>)}{row.notes ? " • note" : ""}{row.url ? " • link" : ""}{row.internalTargetNodeId ? " • topic" : ""}</span>
+    <span className={isTaskOverdue(row.task) ? "outline-meta overdue" : "outline-meta"}>{row.collapsed && row.hiddenCount ? `+${row.hiddenCount}` : ""}{row.icon ? <strong>{row.icon}</strong> : null}{row.task ? <b>{row.task.state === "done" ? "☑" : "☐"}{row.task.priority ? ` P${row.task.priority}` : ""}{row.task.progress != null ? ` ${row.task.progress}%` : ""}{row.task.dueDate ? ` · ${row.task.dueDate}` : ""}{row.task.marker ? ` ${row.task.marker}` : ""}</b> : null}{row.tags.map((tag, index) => <em key={`${tagName(tag)}-${index}`} style={{ backgroundColor: tagColor(tag) }}>#{tagName(tag)}</em>)}{row.attachments.length ? ` • ${row.attachments.length} attachment${row.attachments.length === 1 ? "" : "s"}` : ""}{row.notes ? " • note" : ""}{row.url ? " • link" : ""}{row.internalTargetNodeId ? " • topic" : ""}</span>
     <div className="outline-actions"><button type="button" title="Move up" onClick={() => onMove(row.nodeId, "up")}>↑</button><button type="button" title="Move down" onClick={() => onMove(row.nodeId, "down")}>↓</button><button type="button" title="Indent" onClick={() => onMove(row.nodeId, "indent")}>→</button><button type="button" title="Outdent" onClick={() => onMove(row.nodeId, "outdent")}>←</button>{row.nodeId !== rootNodeId ? <button type="button" title="Delete" onClick={() => onDelete(row.nodeId)}>×</button> : null}</div>
   </div>;
 });

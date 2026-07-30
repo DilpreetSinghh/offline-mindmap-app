@@ -67,9 +67,9 @@ export function propagateTaskRecords(records) {
 }
 
 export function taskIndicator(node) {
-  if (!node?.task && !node?.tags?.length) return "";
+  if (!node?.icon && !node?.task && !node?.tags?.length) return "";
   const task = node.task;
-  const parts = [];
+  const parts = [node.icon ?? ""];
   if (task) parts.push(task.state === "done" ? "☑" : "☐", task.priority ? `P${task.priority}` : "", task.progress != null ? `${task.progress}%` : "", task.marker ?? "", isTaskOverdue(task) ? "OVERDUE" : "");
   parts.push(...(node.tags ?? []).map((tag) => `#${tagName(tag)}`));
   return parts.filter(Boolean).join(" ");
