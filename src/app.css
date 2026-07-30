@@ -17,6 +17,157 @@ body {
   height: 100%;
 }
 
+.whiteboard-loading {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  font: 500 14px/1.4 system-ui, sans-serif;
+  color: #5f5f6b;
+}
+
+.storage-warning {
+  position: fixed;
+  z-index: 20;
+  top: 12px;
+  left: 50%;
+  max-width: min(680px, calc(100vw - 120px));
+  padding: 9px 14px;
+  border: 1px solid #f08c00;
+  border-radius: 8px;
+  background: #fff4e6;
+  color: #7c3e00;
+  font: 500 13px/1.4 system-ui, sans-serif;
+  transform: translateX(-50%);
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(0 0 0 / 45%);
+}
+
+.browser-dialog {
+  display: flex;
+  width: min(920px, 100%);
+  max-height: min(720px, 100%);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 25%);
+  color: #1b1b1f;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+.pdf-dialog {
+  width: min(440px, 100%);
+  padding: 20px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 25%);
+  color: #1b1b1f;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+.pdf-dialog header,
+.pdf-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pdf-dialog h1 { margin: 0; font-size: 20px; }
+.pdf-dialog fieldset { margin: 18px 0 0; padding: 0; border: 0; }
+.pdf-dialog legend { margin-bottom: 8px; font-weight: 650; }
+.pdf-dialog label { display: block; padding: 7px 0; }
+.pdf-dialog small { display: block; margin-left: 24px; color: #73737d; }
+.pdf-dialog footer { justify-content: flex-end; margin-top: 20px; }
+.pdf-dialog button { min-height: 34px; padding: 5px 12px; border: 1px solid #d6d6dd; border-radius: 7px; background: #fff; font: 500 13px system-ui, sans-serif; }
+.pdf-dialog .primary-button { border-color: #6965db; background: #6965db; color: #fff; }
+.dialog-error { color: #c92a2a; }
+
+.browser-dialog > header,
+.drawing-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-dialog > header {
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e9e9ed;
+}
+
+.browser-dialog h1,
+.browser-dialog h2,
+.browser-dialog p { margin: 0; }
+.browser-dialog h1 { font-size: 20px; }
+.browser-dialog h2 { margin-right: auto; font-size: 17px; }
+.browser-dialog header p { margin-top: 2px; color: #6f6f78; }
+
+.browser-dialog button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid #d6d6dd;
+  border-radius: 7px;
+  background: #fff;
+  color: inherit;
+  font: 500 13px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.browser-dialog button:hover { background: #f1f0ff; }
+.browser-dialog button:disabled { cursor: default; opacity: .5; }
+.browser-dialog .primary-button { background: #6965db; color: #fff; }
+.browser-dialog .danger-button { color: #c92a2a; }
+
+.browser-dialog__body {
+  display: grid;
+  min-height: 420px;
+  grid-template-columns: 260px 1fr;
+  overflow: hidden;
+}
+
+.browser-dialog aside {
+  padding: 14px;
+  overflow: auto;
+  border-right: 1px solid #e9e9ed;
+  background: #f8f8fa;
+}
+
+.browser-dialog aside > button { width: 100%; }
+.browser-dialog ul { margin: 12px 0 0; padding: 0; list-style: none; }
+.browser-dialog li + li { margin-top: 5px; }
+.browser-dialog li button { position: relative; width: 100%; text-align: left; }
+.browser-dialog li button.selected { border-color: #6965db; background: #eeedff; }
+.browser-dialog li strong,
+.browser-dialog li span { display: block; }
+.browser-dialog li span { margin-top: 3px; color: #777780; font-size: 11px; }
+.browser-dialog li em { position: absolute; top: 7px; right: 8px; color: #6965db; font-size: 10px; font-style: normal; }
+
+.browser-dialog__details { padding: 18px; overflow: auto; }
+.drawing-actions { flex-wrap: wrap; margin-bottom: 16px; }
+.browser-dialog table { width: 100%; border-collapse: collapse; }
+.browser-dialog th,
+.browser-dialog td { padding: 9px 7px; border-bottom: 1px solid #ececf0; text-align: left; }
+.browser-dialog th { color: #686872; font-size: 12px; }
+.browser-dialog td:last-child { text-align: right; white-space: nowrap; }
+.browser-dialog td button + button { margin-left: 5px; }
+
+@media (max-width: 700px) {
+  .dialog-backdrop { padding: 0; }
+  .browser-dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+  .browser-dialog__body { grid-template-columns: 1fr; overflow: auto; }
+  .browser-dialog aside { max-height: 230px; border-right: 0; border-bottom: 1px solid #e9e9ed; }
+  .storage-warning { top: 62px; max-width: calc(100vw - 24px); }
+}
+
 .visually-hidden {
   position: fixed;
   width: 1px;
