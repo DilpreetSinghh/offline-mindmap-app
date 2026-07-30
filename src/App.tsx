@@ -88,7 +88,10 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const database = await openWhiteboardDatabase();
+        const database = await Promise.race([
+          openWhiteboardDatabase(),
+          new Promise<never>((_resolve, reject) => window.setTimeout(() => reject(new Error("Browser storage did not respond in time.")), 2_000)),
+        ]);
         databaseRef.current = database;
         const meta = await getWorkspaceMeta(database);
         activeDrawingIdRef.current = meta.activeDrawingId;
@@ -96,13 +99,14 @@ export default function App() {
         setStorageWarning(meta.storagePolicy.warning);
         if (navigator.storage?.persist) void navigator.storage.persist();
         if (navigator.storage?.estimate) {
-          const estimate = await navigator.storage.estimate();
-          if (estimate.usage !== undefined && estimate.quota) {
-            const result = await pruneForQuota(database, estimate.usage, estimate.quota);
-            if (result.projectedUsage / estimate.quota >= 0.7) {
-              setStorageWarning("Browser storage is nearly full. Export drawings or delete old history before revision storage pauses.");
+          void navigator.storage.estimate().then(async (estimate) => {
+            if (estimate.usage !== undefined && estimate.quota) {
+              const result = await pruneForQuota(database, estimate.usage, estimate.quota);
+              if (result.projectedUsage / estimate.quota >= 0.7) {
+                setStorageWarning("Browser storage is nearly full. Export drawings or delete old history before revision storage pauses.");
+              }
             }
-          }
+          }).catch(() => { /* Quota inspection must never block the editor. */ });
         }
         let restored: WhiteboardScene = { elements: [], appState: {}, files: {} };
         if (meta.activeDrawingId) {

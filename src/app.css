@@ -28,7 +28,7 @@ body {
 .storage-warning {
   position: fixed;
   z-index: 20;
-  top: 12px;
+  bottom: 64px;
   left: 50%;
   max-width: min(680px, calc(100vw - 120px));
   padding: 9px 14px;
@@ -160,12 +160,12 @@ body {
 .browser-dialog td:last-child { text-align: right; white-space: nowrap; }
 .browser-dialog td button + button { margin-left: 5px; }
 
-@media (max-width: 700px) {
+  @media (max-width: 700px) {
   .dialog-backdrop { padding: 0; }
   .browser-dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; }
   .browser-dialog__body { grid-template-columns: 1fr; overflow: auto; }
   .browser-dialog aside { max-height: 230px; border-right: 0; border-bottom: 1px solid #e9e9ed; }
-  .storage-warning { top: 62px; max-width: calc(100vw - 24px); }
+  .storage-warning { bottom: 70px; max-width: calc(100vw - 24px); }
 }
 
 .visually-hidden {
