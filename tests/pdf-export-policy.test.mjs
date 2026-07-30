@@ -2,41 +2,62 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DARK_EXPORT_BACKGROUND,
-  MAX_PDF_RASTER_DIMENSION,
+  MAX_PDF_PAGE_POINTS,
+  PDF_QUALITY_PRESETS,
   boundedPdfDimensions,
-  pdfBackgroundColour,
-  pdfRasterLimit,
+  pdfCanvasPageDimensions,
+  pdfExportAppState,
+  planPdfRaster,
 } from "../src/pdf-export-policy.mjs";
 
-test("bounds a very large landscape export without changing its aspect ratio", () => {
-  const result = boundedPdfDimensions(120_000, 60_000);
-  assert.deepEqual(result, { width: 4096, height: 2048, scale: 4096 / 120_000 });
-  assert.ok(result.width * result.height <= MAX_PDF_RASTER_DIMENSION ** 2);
+test("offers progressively sharper raster plans for a very large export", () => {
+  const standard = planPdfRaster(120_000, 60_000, "standard");
+  const high = planPdfRaster(120_000, 60_000, "high");
+  const maximum = planPdfRaster(120_000, 60_000, "maximum");
+
+  assert.deepEqual(standard, { width: 4096, height: 2048, scale: 4096 / 120_000 });
+  assert.ok(high.width > standard.width);
+  assert.ok(maximum.width > high.width);
+  assert.ok(high.width * high.height <= PDF_QUALITY_PRESETS.high.maxPixels);
+  assert.ok(maximum.width * maximum.height <= PDF_QUALITY_PRESETS.maximum.maxPixels);
+  assert.ok(Math.abs(high.width / high.height - 2) < 0.001);
+  assert.ok(Math.abs(maximum.width / maximum.height - 2) < 0.001);
 });
 
-test("bounds a very large portrait export without changing its aspect ratio", () => {
-  const result = boundedPdfDimensions(40_000, 160_000);
-  assert.deepEqual(result, { width: 1024, height: 4096, scale: 4096 / 160_000 });
+test("increases ordinary-scene resolution at high and maximum quality", () => {
+  assert.deepEqual(planPdfRaster(1920, 1080, "standard"), { width: 1920, height: 1080, scale: 1 });
+  assert.deepEqual(planPdfRaster(1920, 1080, "high"), { width: 3840, height: 2160, scale: 2 });
+  assert.deepEqual(planPdfRaster(1920, 1080, "maximum"), { width: 5760, height: 3240, scale: 3 });
 });
 
-test("keeps ordinary export dimensions at their original size", () => {
-  assert.deepEqual(boundedPdfDimensions(1920, 1080), { width: 1920, height: 1080, scale: 1 });
+test("keeps canvas page geometry independent from raster quality and within PDF limits", () => {
+  const page = pdfCanvasPageDimensions(120_000, 60_000);
+  assert.equal(Math.max(page.width, page.height), MAX_PDF_PAGE_POINTS);
+  assert.equal(page.width / page.height, 2);
 });
 
-test("applies the safe raster limit to every PDF layout", () => {
-  for (const layout of ["a4-fit", "canvas", "a4-tiles"]) {
-    assert.equal(pdfRasterLimit(layout), MAX_PDF_RASTER_DIMENSION);
-  }
-  assert.throws(() => pdfRasterLimit("unknown"), /Unsupported PDF layout/);
+test("keeps tiled layout geometry at a stable compatibility size", () => {
+  assert.deepEqual(boundedPdfDimensions(120_000, 60_000), { width: 4096, height: 2048, scale: 4096 / 120_000 });
 });
 
-test("uses an explicit dark page only when background and dark rendering are enabled", () => {
-  assert.equal(pdfBackgroundColour("#f8f6f1", true, true), DARK_EXPORT_BACKGROUND);
-  assert.equal(pdfBackgroundColour("#f8f6f1", true, false), "#f8f6f1");
-  assert.equal(pdfBackgroundColour("#f8f6f1", false, true), "#f8f6f1");
+test("constructs the exact Excalidraw dark-background export state", () => {
+  const current = { viewBackgroundColor: "#f8f6f1", theme: "light", exportScale: 1 };
+  assert.deepEqual(pdfExportAppState(current, true, true), {
+    ...current,
+    exportBackground: true,
+    exportWithDarkMode: true,
+    viewBackgroundColor: DARK_EXPORT_BACKGROUND,
+  });
+  assert.deepEqual(pdfExportAppState(current, false, true), {
+    ...current,
+    exportBackground: false,
+    exportWithDarkMode: true,
+    viewBackgroundColor: current.viewBackgroundColor,
+  });
 });
 
-test("rejects invalid raster dimensions", () => {
-  assert.throws(() => boundedPdfDimensions(0, 100), /positive finite/);
+test("rejects invalid quality and raster dimensions", () => {
+  assert.throws(() => planPdfRaster(100, 100, "unknown"), /Unsupported PDF quality/);
+  assert.throws(() => planPdfRaster(0, 100, "high"), /positive finite/);
   assert.throws(() => boundedPdfDimensions(Number.POSITIVE_INFINITY, 100), /positive finite/);
 });

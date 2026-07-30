@@ -85,6 +85,7 @@ body {
 .pdf-dialog fieldset { margin: 18px 0 0; padding: 0; border: 0; }
 .pdf-dialog legend { margin-bottom: 8px; font-weight: 650; }
 .pdf-dialog label { display: block; padding: 7px 0; }
+.pdf-dialog select { display: block; width: 100%; margin-top: 7px; min-height: 36px; padding: 5px 8px; border: 1px solid #d6d6dd; border-radius: 7px; background: #fff; color: #1b1b1f; }
 .pdf-dialog small { display: block; margin-left: 24px; color: #73737d; }
 .pdf-dialog footer { justify-content: flex-end; margin-top: 20px; }
 .pdf-dialog button { min-height: 34px; padding: 5px 12px; border: 1px solid #d6d6dd; border-radius: 7px; background: #fff; font: 500 13px system-ui, sans-serif; }

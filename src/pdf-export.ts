@@ -1,11 +1,18 @@
 import { exportToCanvas } from "@excalidraw/excalidraw";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import { pdfBackgroundColour, pdfRasterLimit } from "./pdf-export-policy.mjs";
+import {
+  boundedPdfDimensions,
+  pdfCanvasPageDimensions,
+  pdfExportAppState,
+  planPdfRaster,
+} from "./pdf-export-policy.mjs";
 
 export type PdfLayout = "a4-fit" | "canvas" | "a4-tiles";
+export type PdfQuality = "standard" | "high" | "maximum";
 export type PdfOptions = {
   layout: PdfLayout;
+  quality: PdfQuality;
   selectionOnly: boolean;
   background: boolean;
   dark: boolean;
@@ -46,22 +53,28 @@ function exportElements(api: ExcalidrawImperativeAPI, selectionOnly: boolean): r
   return api.getSceneElements().filter((element) => !element.isDeleted && (!selectionOnly || selected[element.id])) as readonly NonDeletedExcalidrawElement[];
 }
 
-async function sceneCanvas(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<HTMLCanvasElement> {
-  const appState: Partial<AppState> = {
-    ...api.getAppState(),
-    exportBackground: options.background,
-    exportWithDarkMode: options.dark,
-    viewBackgroundColor: pdfBackgroundColour(api.getAppState().viewBackgroundColor, options.background, options.dark),
-  };
-  return exportToCanvas({
+type SceneCanvas = {
+  canvas: HTMLCanvasElement;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+async function sceneCanvas(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<SceneCanvas> {
+  const appState: Partial<AppState> = pdfExportAppState(api.getAppState(), options.background, options.dark);
+  let sourceWidth = 0;
+  let sourceHeight = 0;
+  const canvas = await exportToCanvas({
     elements: exportElements(api, options.selectionOnly),
     appState,
     files: api.getFiles() as BinaryFiles,
     exportPadding: 0,
-    // Browsers refuse to serialise very large canvases. Bound the raster before
-    // converting it to PNG so every PDF layout remains usable on large scenes.
-    maxWidthOrHeight: pdfRasterLimit(options.layout),
+    getDimensions: (width: number, height: number) => {
+      sourceWidth = width;
+      sourceHeight = height;
+      return planPdfRaster(width, height, options.quality);
+    },
   });
+  return { canvas, sourceWidth, sourceHeight };
 }
 
 async function canvasPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
@@ -74,14 +87,13 @@ function safeName(name: string): string {
 }
 
 export async function createPdf(api: ExcalidrawImperativeAPI, options: PdfOptions): Promise<Uint8Array> {
-  const canvas = await sceneCanvas(api, options);
+  const { canvas, sourceWidth, sourceHeight } = await sceneCanvas(api, options);
   if (!canvas.width || !canvas.height) throw new Error("There is nothing to export.");
   const { PDFDocument } = await import("pdf-lib");
   const pdf = await PDFDocument.create();
 
   if (options.layout === "canvas") {
-    const width = canvas.width * PX_TO_PT;
-    const height = canvas.height * PX_TO_PT;
+    const { width, height } = pdfCanvasPageDimensions(sourceWidth, sourceHeight, PX_TO_PT);
     const image = await pdf.embedPng(await canvasPng(canvas));
     pdf.addPage([width, height]).drawImage(image, { x: 0, y: 0, width, height });
   } else if (options.layout === "a4-fit") {
@@ -94,22 +106,29 @@ export async function createPdf(api: ExcalidrawImperativeAPI, options: PdfOption
     const image = await pdf.embedPng(await canvasPng(canvas));
     pdf.addPage([pageWidth, pageHeight]).drawImage(image, { x: (pageWidth - width) / 2, y: (pageHeight - height) / 2, width, height });
   } else {
-    const plan = planA4Tiles(canvas.width, canvas.height);
+    const logical = boundedPdfDimensions(sourceWidth, sourceHeight);
+    const plan = planA4Tiles(logical.width, logical.height);
     const strideX = plan.tileWidthPx - plan.overlapPx;
     const strideY = plan.tileHeightPx - plan.overlapPx;
+    const rasterScaleX = canvas.width / logical.width;
+    const rasterScaleY = canvas.height / logical.height;
     for (let row = 0; row < plan.rows; row += 1) {
       for (let column = 0; column < plan.columns; column += 1) {
-        const sourceX = Math.round(column * strideX);
-        const sourceY = Math.round(row * strideY);
-        const sourceWidth = Math.min(Math.ceil(plan.tileWidthPx), canvas.width - sourceX);
-        const sourceHeight = Math.min(Math.ceil(plan.tileHeightPx), canvas.height - sourceY);
+        const logicalX = Math.round(column * strideX);
+        const logicalY = Math.round(row * strideY);
+        const logicalWidth = Math.min(Math.ceil(plan.tileWidthPx), logical.width - logicalX);
+        const logicalHeight = Math.min(Math.ceil(plan.tileHeightPx), logical.height - logicalY);
+        const sourceX = Math.round(logicalX * rasterScaleX);
+        const sourceY = Math.round(logicalY * rasterScaleY);
+        const tileWidth = Math.min(Math.ceil(logicalWidth * rasterScaleX), canvas.width - sourceX);
+        const tileHeight = Math.min(Math.ceil(logicalHeight * rasterScaleY), canvas.height - sourceY);
         const tile = document.createElement("canvas");
-        tile.width = sourceWidth;
-        tile.height = sourceHeight;
-        tile.getContext("2d")?.drawImage(canvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+        tile.width = tileWidth;
+        tile.height = tileHeight;
+        tile.getContext("2d")?.drawImage(canvas, sourceX, sourceY, tileWidth, tileHeight, 0, 0, tileWidth, tileHeight);
         const image = await pdf.embedPng(await canvasPng(tile));
-        const width = sourceWidth * PX_TO_PT;
-        const height = sourceHeight * PX_TO_PT;
+        const width = logicalWidth * PX_TO_PT;
+        const height = logicalHeight * PX_TO_PT;
         pdf.addPage([plan.pageWidth, plan.pageHeight]).drawImage(image, {
           x: plan.margin, y: plan.pageHeight - plan.margin - height, width, height,
         });
