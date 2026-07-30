@@ -1,8 +1,6 @@
 import { defineConfig } from "vite";
-import { readFileSync } from "node:fs";
 
 const sourceSha = process.env.SOURCE_SHA || "development";
-const classicAssets = ["app.js", "storage.js", "hierarchy.js", "shortcuts.js"];
 
 export default defineConfig({
   base: "./",
@@ -16,11 +14,6 @@ export default defineConfig({
       transformIndexHtml(html) {
         return html.replaceAll("__SOURCE_SHA__", sourceSha);
       },
-      generateBundle() {
-        for (const fileName of classicAssets) {
-          this.emitFile({ type: "asset", fileName, source: readFileSync(fileName, "utf8") });
-        }
-      },
     },
   ],
   build: {
@@ -28,6 +21,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         app: "index.html",
+        legacy: "legacy/index.html",
         classic: "classic/index.html",
       },
     },

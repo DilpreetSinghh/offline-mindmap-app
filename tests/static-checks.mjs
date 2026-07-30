@@ -1,124 +1,41 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 
-const html = await readFile(new URL("../classic/index.html", import.meta.url), "utf8");
-const betaHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
-const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-const betaApp = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
-const betaDocument = await readFile(new URL("../src/document.ts", import.meta.url), "utf8");
-const betaDatabase = await readFile(new URL("../src/db.ts", import.meta.url), "utf8");
-const betaCommands = await readFile(new URL("../src/commands.ts", import.meta.url), "utf8");
-const betaOperations = await readFile(new URL("../src/mindmap-operations.ts", import.meta.url), "utf8");
-const betaExports = await readFile(new URL("../src/exports.ts", import.meta.url), "utf8");
-const simpleMindmap = await readFile(new URL("../src/SimpleMindmap.tsx", import.meta.url), "utf8");
-const outlineView = await readFile(new URL("../src/OutlineView.tsx", import.meta.url), "utf8");
-const nodeDetails = await readFile(new URL("../src/NodeDetailsDialog.tsx", import.meta.url), "utf8");
-const taskHelpers = await readFile(new URL("../src/tasks.mjs", import.meta.url), "utf8");
-const attachments = await readFile(new URL("../src/attachments.mjs", import.meta.url), "utf8");
-const media = await readFile(new URL("../src/media.ts", import.meta.url), "utf8");
-const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(
-  (match) => match[1]
-);
+const rootHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const legacyHtml = await readFile(new URL("../legacy/index.html", import.meta.url), "utf8");
+const classicHtml = await readFile(new URL("../classic/index.html", import.meta.url), "utf8");
+const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const database = await readFile(new URL("../src/whiteboard-db.ts", import.meta.url), "utf8");
+const legacyReader = await readFile(new URL("../src/legacy-reader.ts", import.meta.url), "utf8");
+const pdf = await readFile(new URL("../src/pdf-export.ts", import.meta.url), "utf8");
+const vite = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 
-assert.equal(
-  scriptSources.some((source) => /^https?:\/\//i.test(source)),
-  false,
-  "Runtime scripts must be served locally so the app works offline"
-);
-assert.ok(
-  scriptSources.includes("../pdf-lib.min.js"),
-  "classic recovery must load the vendored pdf-lib bundle"
-);
-assert.ok(scriptSources.includes("../storage.js"), "classic recovery must load the storage module");
-assert.ok(scriptSources.includes("../hierarchy.js"), "classic recovery must load the hierarchy module");
-assert.ok(scriptSources.includes("../shortcuts.js"), "classic recovery must load the shortcut module");
-
-assert.doesNotMatch(html, /<button(?![^>]*\btype=["']button["'])/gi, "Every button must declare type=button");
-assert.match(html, />Save locally<\/button>/, "The explicit map save action must be labelled Save locally");
-assert.match(html, />Save as copy<\/button>/, "The toolbar must expose Save as copy");
-assert.match(betaHtml, /name="source-commit" content="__SOURCE_SHA__"/, "The deploy build must expose its source SHA");
-assert.match(betaHtml, /src="\/src\/main\.tsx"/, "The public beta must boot the Vite React editor");
-assert.doesNotMatch(betaHtml, /Whiteboard Beta/, "The modern editor must be presented as the default experience");
-assert.match(betaApp, /<Excalidraw/, "The public beta must embed Excalidraw core");
-assert.match(betaApp, /Classic recovery/, "The public beta must retain a classic recovery path");
-assert.match(betaApp, /Save locally/, "The public beta must expose local named-map save");
-assert.match(betaApp, /Save as copy/, "The public beta must expose save-as-copy");
-assert.match(betaApp, /surfaceMode === "whiteboard"/, "The default app must support whiteboard and simple views");
-assert.match(betaApp, /detectsMobileUse/, "The app must automatically detect mobile use");
-assert.match(betaApp, /editingTextElement:\s*null/, "Transient text-editing state must not survive recovery or reload");
-assert.doesNotMatch(betaApp, /context-menu/, "The app must not layer a custom context menu over Excalidraw");
-assert.match(betaCommands, /routeMindmapShortcut/, "Keyboard commands must use the platform-neutral tested shortcut router");
-assert.match(betaApp, /aria-label="Search shortcuts"/, "The shortcut reference opened by ? must be searchable");
-assert.match(betaCommands, /Rearrange mind map/, "Existing maps must expose an explicit spacing repair command");
-assert.match(betaOperations, /shouldReflowAfterInsertion\(direction\)/, "All supported insertion paths must share the reflow policy");
-assert.match(betaOperations, /inferBoundTree/, "Rearrange must include ordinary shapes connected with arrows");
-assert.match(betaExports, /await import\("pdf-lib"\)/, "Modern PDF export must lazy-load its bundled offline PDF engine");
-assert.doesNotMatch(betaExports, /mimeType: "image\/png", quality:/, "PNG export must not pass an ignored quality option");
-assert.match(betaExports, /clipboard-download-fallback/, "Clipboard export must fall back to a PNG download when permission is unavailable");
-assert.match(simpleMindmap, /Simple mind map/, "A non-Excalidraw simple mobile surface must be available");
-assert.match(simpleMindmap, /simple-arrow/, "Simple mode must render visible hierarchy arrows");
-assert.match(betaApp, /surfaceMode === "outline"/, "The active map must expose a synchronised outline surface");
-assert.match(outlineView, /rows\.slice\(start, end\)/, "Large outlines must render a virtual window instead of every row");
-assert.match(outlineView, /Alt\+↑\/↓ reorder/, "The outline must advertise keyboard structural editing");
-assert.match(outlineView, /outlineMarkdown/, "The outline must support independent Markdown export");
-assert.match(nodeDetails, /sanitiseNodeUrl/, "Node links must be sanitised before save or open");
-assert.match(nodeDetails, /Missing topic:/, "Broken internal topic links must be visibly repairable");
-assert.match(nodeDetails, /External links open only when you press Open link/, "External links must require explicit user action");
-assert.match(nodeDetails, /Make this node a task/, "Node details must expose task editing");
-assert.match(betaDocument, /Invalid task priority/, "Native JSON validation must cover task metadata");
-assert.match(betaDocument, /kind: "task-marker"/, "Whiteboard nodes must project visible task and tag markers");
-assert.match(outlineView, /taskPaperMarkdown/, "Tasks must have an independent Markdown and TaskPaper-compatible export");
-assert.match(betaApp, /Overdue only/, "Search must expose an overdue task filter");
-assert.match(betaApp, /onExportTasks=\{exportTasks\}/, "Outline must expose task export");
-assert.match(simpleMindmap, /taskIndicator/, "Simple mode must show task state without opening details");
-assert.match(taskHelpers, /propagateTaskRecords/, "Automatic parent progress must be persisted in canonical node records");
-assert.match(nodeDetails, /Search offline icons/, "The node editor must expose a searchable offline icon catalogue");
-assert.match(nodeDetails, /Add node image/, "The node editor must expose explicit image attachment");
-assert.match(nodeDetails, /Attach file/, "The node editor must support offline file attachments");
-assert.match(betaApp, /Attachment limit/, "The app must expose a configurable per-file attachment limit");
-assert.match(betaApp, /sanitiseSceneMedia/, "Picker, drop, and clipboard images must pass through local validation");
-assert.match(betaDatabase, /documentWithoutAssetPayloads/, "Large asset payloads must be separated from document records");
-assert.match(betaDatabase, /replaceAssetRecords/, "Deleted attachments must clear stale IndexedDB asset records on save");
-assert.match(betaDatabase, /hydrateDocument/, "IndexedDB reads must restore separated image and attachment payloads");
-assert.match(betaExports, /referencedBinaryFiles/, "Image exports must include only referenced local binaries");
-assert.match(betaDocument, /Attachment data is missing/, "Native schema validation must reject broken attachment references");
-assert.match(media, /URL\.revokeObjectURL\(url\)/, "Image metadata probing must revoke object URLs");
-assert.match(attachments, /validateImageFile/, "Unsupported and oversized images must fail through a tested validator");
-assert.match(betaDocument, /schemaVersion:\s*DOCUMENT_SCHEMA_VERSION/, "DocumentV3 must carry an explicit schema version");
-assert.match(betaDocument, /mindmapNode/, "Mind-map semantics must be stored in element customData");
-assert.match(betaDocument, /mindmapConnection/, "Connection semantics must be stored in element customData");
-assert.match(betaDocument, /if \(nodes\.size\)/, "Whiteboard-only documents must validate without a mind-map root");
-assert.match(betaApp, /mergeFoldedScene\(tab\.document\.scene\.elements, api\.getSceneElements\(\)\)[\s\S]*normaliseRootlessWhiteboard\(merged, tab\.document\.rootNodeId\)/, "Local save must merge folded content and normalise a deleted-root scene before validation");
-assert.match(betaCommands, /Selected shape is now the root mind-map node/, "A selected whiteboard shape must be promotable to a replacement root");
-assert.match(betaCommands, /offline-mindmap-subtree/, "Subtree clipboard data must use an explicit versioned format");
-assert.match(betaCommands, /delete copiedData\.attachments/, "Subtree copies must not retain broken local attachment references");
-assert.match(betaCommands, /appendStyledConnection/, "Subtree paste must restore internal styled connections");
-assert.match(betaCommands, /removeMindmapSubtrees/, "Bulk deletion must remove selected branches in one transaction");
-assert.match(betaApp, /addEventListener\("paste"/, "External Markdown and plain-text lists must be handled from the paste event");
-assert.match(betaDocument, /projectFoldedElements/, "Collapsed descendants must be projected out of the Excalidraw scene");
-assert.match(betaApp, /mergeFoldedScene/, "Visible Excalidraw edits must merge back into the full canonical document");
-assert.match(betaCommands, /Collapse all branches/, "The command layer must expose level and all-branch folding");
-assert.match(simpleMindmap, /Expand \+/, "Simple mode must show hidden descendant counts on collapsed nodes");
-assert.match(betaDatabase, /indexedDB\.open/, "Schema-3 documents must use IndexedDB");
-assert.match(betaDatabase, /compareMigration/, "Migration must perform read-back hierarchy verification");
-
-await access(new URL("../vendor/pdf-lib.min.js", import.meta.url));
+assert.match(rootHtml, /Offline Whiteboard/);
+assert.match(rootHtml, /name="source-commit" content="__SOURCE_SHA__"/);
+assert.match(app, /<Excalidraw/);
+assert.match(app, /loadFromBlob/);
+assert.match(app, /Browser drawings…/);
+assert.match(app, /Export PDF…/);
+assert.doesNotMatch(app, /SimpleMindmap|OutlineView|NodeDetailsDialog|mindmap-operations|custom search/i);
+assert.match(database, /offline-whiteboard-v1/);
+assert.match(database, /DRAWINGS_STORE/);
+assert.match(database, /REVISIONS_STORE/);
+assert.match(database, /ASSETS_STORE/);
+assert.match(database, /WORKSPACE_STORE/);
+assert.match(database, /minimumPerDrawing = 25/);
+assert.match(app, /30_000/);
+assert.match(app, /navigator\.storage\.persist/);
+assert.match(app, /navigator\.storage\.estimate/);
+assert.match(pdf, /5 \* 96 \/ 25\.4/);
+assert.match(pdf, /10 \* MM_TO_PT/);
+assert.match(pdf, /for \(let row[\s\S]*for \(let column/);
+assert.match(pdf, /await import\("pdf-lib"\)/);
+assert.match(legacyHtml, /legacy-main\.tsx/);
+assert.match(classicHtml, /legacy\/index\.html/);
+assert.match(legacyReader, /transaction\(\["documents", "assets"\], "readonly"\)/);
+assert.doesNotMatch(legacyReader, /\.put\(|\.add\(|\.delete\(/);
+assert.match(vite, /legacy: "legacy\/index\.html"/);
+assert.match(vite, /classic: "classic\/index\.html"/);
+assert.doesNotMatch(rootHtml + legacyHtml + app, /https?:\/\/[^"']+\.(?:js|css|woff2?)/i);
 await access(new URL("../vendor/pdf-lib.LICENSE.md", import.meta.url));
-
-assert.match(
-  app,
-  /connectorStyleSelect\.value\s*=\s*state\.connectorStyle/,
-  "The connector-style control must be synchronised from the active tab"
-);
-assert.match(
-  app,
-  /if \(index < activeTabIndex\)[\s\S]*?activeTabIndex -= 1/,
-  "Closing a tab to the left must preserve the active tab"
-);
-assert.match(
-  app,
-  /format === "heif" && !\/\^image\\\/hei\[cf\]/,
-  "HEIF export must validate the encoder's returned MIME type"
-);
-
-console.log("Static offline-dependency checks passed.");
+console.log("Static offline, routing, storage and source-metadata checks passed.");

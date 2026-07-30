@@ -1,0 +1,31 @@
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+body { background: #f8f8fa; color: #1f1f24; font: 14px/1.45 system-ui, sans-serif; }
+.legacy-app { min-height: 100vh; }
+.legacy-app > header { display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; border-bottom: 1px solid #dedee5; background: #fff; }
+.legacy-app h1, .legacy-app h2, .legacy-app p { margin: 0; }
+.legacy-app h1 { font-size: 20px; }
+.legacy-app header p { color: #71717a; }
+.legacy-app a { color: #5f3dc4; }
+.legacy-notice { padding: 9px 22px; border-bottom: 1px solid #ffd8a8; background: #fff4e6; color: #7c3e00; }
+.legacy-workspace { display: grid; height: calc(100vh - 111px); grid-template-columns: 240px minmax(0, 1fr) 220px; }
+.legacy-workspace nav, .legacy-exports { padding: 14px; overflow: auto; background: #fff; }
+.legacy-workspace nav { border-right: 1px solid #dedee5; }
+.legacy-exports { border-left: 1px solid #dedee5; }
+.legacy-workspace button { width: 100%; min-height: 34px; padding: 6px 9px; border: 1px solid #d6d6dd; border-radius: 7px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+.legacy-workspace button:hover, .legacy-workspace button.selected { border-color: #6965db; background: #eeedff; }
+.legacy-workspace button:disabled { cursor: default; opacity: .5; }
+.legacy-workspace nav p { margin: 12px 0; color: #6f6f78; font-size: 12px; }
+.legacy-workspace ul { margin: 0; padding: 0; list-style: none; }
+.legacy-workspace li + li { margin-top: 6px; }
+.legacy-workspace li span { display: block; color: #777780; font-size: 11px; }
+.legacy-preview { min-width: 0; min-height: 0; }
+.legacy-preview .excalidraw { width: 100%; height: 100%; }
+.legacy-empty { display: grid; height: 100%; place-items: center; color: #73737d; }
+.legacy-exports h2 { margin-bottom: 12px; font-size: 16px; }
+.legacy-exports button + button { margin-top: 7px; }
+.legacy-exports hr { margin: 14px 0; border: 0; border-top: 1px solid #e2e2e7; }
+@media (max-width: 760px) {
+  .legacy-workspace { height: auto; min-height: calc(100vh - 111px); grid-template-columns: 1fr; }
+  .legacy-workspace nav, .legacy-exports { border: 0; border-bottom: 1px solid #dedee5; }
+  .legacy-preview { height: 60vh; }
+}
