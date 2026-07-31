@@ -40,6 +40,9 @@ export type WorkspaceMeta = {
   key: "workspace";
   activeDrawingId: string | null;
   libraryItems: LibraryItems;
+  preferences: {
+    shapeRecognition: boolean;
+  };
   storagePolicy: {
     revisionsEnabled: boolean;
     warning: string | null;
@@ -58,6 +61,9 @@ const DEFAULT_META: WorkspaceMeta = {
   key: "workspace",
   activeDrawingId: null,
   libraryItems: [],
+  preferences: {
+    shapeRecognition: true,
+  },
   storagePolicy: {
     revisionsEnabled: true,
     warning: null,

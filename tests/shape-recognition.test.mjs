@@ -1,0 +1,276 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { SHAPE_RECOGNITION_DEFAULTS, absolutePoints, recogniseShape, shapeSkeleton } from "../src/shape-recognition.mjs";
+
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function jittered(points, amplitude, random) {
+  const offset = () => (random() - 0.5) * 2 * amplitude;
+  return points.map(([x, y]) => [x + offset(), y + offset()]);
+}
+
+function circleStroke(radius, count = 48, jitter = 0, random = mulberry32(1)) {
+  return jittered(Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }), jitter, random);
+}
+
+function ellipseStroke(rx, ry, count = 48, jitter = 0, random = mulberry32(2)) {
+  return jittered(Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2;
+    return [rx * Math.cos(angle), ry * Math.sin(angle)];
+  }), jitter, random);
+}
+
+function rectangleStroke(width, height, jitter = 0, random = mulberry32(3), rotation = 0) {
+  const corners = [[0, 0], [width, 0], [width, height], [0, height]];
+  const points = [];
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  for (let edge = 0; edge < 4; edge += 1) {
+    const [x1, y1] = corners[edge];
+    const [x2, y2] = corners[(edge + 1) % 4];
+    for (let step = 0; step < 14; step += 1) {
+      const ratio = step / 14;
+      let x = x1 + (x2 - x1) * ratio;
+      let y = y1 + (y2 - y1) * ratio;
+      if (rotation) {
+        const rotatedX = x * cosine - y * sine;
+        const rotatedY = x * sine + y * cosine;
+        x = rotatedX;
+        y = rotatedY;
+      }
+      points.push([x, y]);
+    }
+  }
+  return jittered(points, jitter, random);
+}
+
+function roundedRectangleStroke(width, height, cornerRadius, random = mulberry32(4)) {
+  const points = [];
+  const corners = [[cornerRadius, 0], [width - cornerRadius, 0], [width, cornerRadius], [width, height - cornerRadius],
+    [width - cornerRadius, height], [cornerRadius, height], [0, height - cornerRadius], [0, cornerRadius]];
+  for (let edge = 0; edge < 8; edge += 1) {
+    const [x1, y1] = corners[edge];
+    const [x2, y2] = corners[(edge + 1) % 8];
+    for (let step = 0; step < 10; step += 1) {
+      const ratio = step / 10;
+      points.push([x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio]);
+    }
+  }
+  return jittered(points, 1, random);
+}
+
+function triangleStroke(random = mulberry32(5), jitter = 1) {
+  const vertices = [[0, 0], [100, 0], [50, 86.6]];
+  const points = [];
+  for (let edge = 0; edge < 3; edge += 1) {
+    const [x1, y1] = vertices[edge];
+    const [x2, y2] = vertices[(edge + 1) % 3];
+    for (let step = 0; step < 12; step += 1) {
+      const ratio = step / 12;
+      points.push([x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio]);
+    }
+  }
+  return jittered(points, jitter, random);
+}
+
+function diamondStroke(random = mulberry32(6), jitter = 1) {
+  const vertices = [[50, 0], [100, 50], [50, 100], [0, 50]];
+  const points = [];
+  for (let edge = 0; edge < 4; edge += 1) {
+    const [x1, y1] = vertices[edge];
+    const [x2, y2] = vertices[(edge + 1) % 4];
+    for (let step = 0; step < 12; step += 1) {
+      const ratio = step / 12;
+      points.push([x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio]);
+    }
+  }
+  return jittered(points, jitter, random);
+}
+
+function lineStroke(x1, y1, x2, y2, jitter = 1, random = mulberry32(7), count = 60) {
+  return jittered(Array.from({ length: count }, (_, index) => {
+    const ratio = index / (count - 1);
+    return [x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio];
+  }), jitter, random);
+}
+
+function wavyStroke(length = 200, amplitude = 12, random = mulberry32(8)) {
+  return jittered(Array.from({ length: 80 }, (_, index) => {
+    const x = (index / 79) * length;
+    return [x, amplitude * Math.sin((index / 79) * Math.PI * 6)];
+  }), 1, random);
+}
+
+function arrowStroke(jitter = 0, random = mulberry32(9)) {
+  const points = Array.from({ length: 50 }, (_, index) => {
+    const ratio = index / 49;
+    return [(index / 49) * 140, (random() - 0.5) * 2 * jitter];
+  });
+  points.push([150, 0], [142, 7]);
+  return points;
+}
+
+test("converts a clean circle stroke into an ellipse", () => {
+  const shape = recogniseShape({ points: circleStroke(50) });
+  assert.equal(shape.type, "ellipse");
+  assert.ok(Math.abs(shape.width - 100) < 2);
+  assert.ok(Math.abs(shape.height - 100) < 2);
+  assert.equal(shape.angle, 0);
+  assert.equal(shape.points, null);
+});
+
+test("still converts a noticeably wobbly circle", () => {
+  const shape = recogniseShape({ points: circleStroke(50, 48, 3) });
+  assert.equal(shape.type, "ellipse");
+});
+
+test("converts a squashed circle into a rotated or flat ellipse", () => {
+  const shape = recogniseShape({ points: ellipseStroke(80, 40) });
+  assert.equal(shape.type, "ellipse");
+  const aspect = Math.max(shape.width / shape.height, shape.height / shape.width);
+  assert.ok(aspect > 1.7);
+});
+
+test("rejects a scribble blob that is too far from a circle", () => {
+  assert.equal(recogniseShape({ points: circleStroke(40, 48, 12) }), null);
+});
+
+test("converts a rectangle stroke into a rectangle with matching size", () => {
+  const shape = recogniseShape({ points: rectangleStroke(120, 80, 2) });
+  assert.equal(shape.type, "rectangle");
+  assert.ok(Math.abs(shape.width - 120) < 4);
+  assert.ok(Math.abs(shape.height - 80) < 4);
+  assert.equal(shape.angle, 0);
+});
+
+test("converts a rotated rectangle and keeps the rotation angle", () => {
+  const shape = recogniseShape({ points: rectangleStroke(120, 80, 1, mulberry32(31), Math.PI / 6) });
+  assert.equal(shape.type, "rectangle");
+  assert.ok(Math.abs(shape.angle - Math.PI / 6) < 0.05);
+});
+
+test("rejects a rounded rectangle without sharp corners", () => {
+  assert.equal(recogniseShape({ points: roundedRectangleStroke(120, 80, 20) }), null);
+});
+
+test("converts a triangle stroke into a triangle element with normalized points", () => {
+  const shape = recogniseShape({ points: triangleStroke() });
+  assert.equal(shape.type, "triangle");
+  assert.equal(shape.points.length, 3);
+  for (const [x, y] of shape.points) {
+    assert.ok(x >= -0.02 && x <= 1.02 && y >= -0.02 && y <= 1.02);
+  }
+});
+
+test("converts a diamond stroke into a diamond element", () => {
+  const shape = recogniseShape({ points: diamondStroke() });
+  assert.equal(shape.type, "diamond");
+  assert.ok(Math.abs(shape.width - 100) < 3);
+  assert.ok(Math.abs(shape.height - 100) < 3);
+});
+
+test("converts a nearly straight stroke into a line", () => {
+  const shape = recogniseShape({ points: lineStroke(0, 0, 200, 30, 1.5) });
+  assert.equal(shape.type, "line");
+  assert.deepEqual(shape.points[0], [0, 0]);
+  assert.ok(Math.abs(shape.points[1][0] - 200) < 5);
+  assert.ok(Math.abs(shape.points[1][1] - 30) < 5);
+});
+
+test("converts a straight stroke with a backward V at the end into an arrow", () => {
+  const shape = recogniseShape({ points: arrowStroke() });
+  assert.equal(shape.type, "arrow");
+  assert.deepEqual(shape.points, [[0, 0], [150, 0]]);
+});
+
+test("rejects a wavy stroke instead of converting it to a line", () => {
+  assert.equal(recogniseShape({ points: wavyStroke() }), null);
+});
+
+test("rejects strokes that are too small or too short to classify", () => {
+  assert.equal(recogniseShape({ points: circleStroke(3) }), null);
+  assert.equal(recogniseShape({ points: [[0, 0], [5, 0], [10, 0], [15, 0]] }), null);
+  assert.equal(recogniseShape({ points: [] }), null);
+  assert.equal(recogniseShape({ points: [[0, 0], [1, 1]] }), null);
+});
+
+test("respects the enabled option", () => {
+  assert.equal(recogniseShape({ points: circleStroke(50) }, { enabled: false }), null);
+  assert.equal(recogniseShape({ points: circleStroke(50) }, { enabled: true }).type, "ellipse");
+});
+
+test("keeps defaults frozen and consistent", () => {
+  assert.equal(SHAPE_RECOGNITION_DEFAULTS.enabled, true);
+  assert.equal(SHAPE_RECOGNITION_DEFAULTS.minDimension, 10);
+  assert.throws(() => { SHAPE_RECOGNITION_DEFAULTS.enabled = false; }, TypeError);
+});
+
+test("normalises freedraw points into absolute deduplicated coordinates", () => {
+  const points = [[0, 0], [10, 5], [10.1, 5.1], [20, 10]];
+  assert.deepEqual(absolutePoints(points), [[0, 0], [10, 5], [20, 10]]);
+  assert.deepEqual(absolutePoints([[3, 4], [13, 9], [23, 14]]), [[3, 4], [13, 9], [23, 14]]);
+  assert.deepEqual(absolutePoints(null), []);
+  assert.deepEqual(absolutePoints([[NaN, 0]]), []);
+});
+
+test("shapeSkeleton preserves freehand styling on the replacement element", () => {
+  const source = {
+    strokeColor: "#e03131",
+    backgroundColor: "#ffc9c9",
+    fillStyle: "hachure",
+    strokeWidth: 4,
+    strokeStyle: "dashed",
+    roughness: 2,
+    opacity: 60,
+    groupIds: ["group-1"],
+    frameId: "frame-9",
+    locked: true,
+    link: "https://example.com",
+  };
+  const shape = recogniseShape({ points: circleStroke(50) });
+  const skeleton = shapeSkeleton(source, shape);
+  assert.equal(skeleton.type, "ellipse");
+  assert.equal(skeleton.strokeColor, "#e03131");
+  assert.equal(skeleton.backgroundColor, "#ffc9c9");
+  assert.equal(skeleton.fillStyle, "hachure");
+  assert.equal(skeleton.strokeWidth, 4);
+  assert.equal(skeleton.strokeStyle, "dashed");
+  assert.equal(skeleton.roughness, 2);
+  assert.equal(skeleton.opacity, 60);
+  assert.deepEqual(skeleton.groupIds, ["group-1"]);
+  assert.equal(skeleton.frameId, "frame-9");
+  assert.equal(skeleton.locked, true);
+  assert.equal(skeleton.link, "https://example.com");
+  assert.deepEqual(skeleton.points, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+});
+
+test("shapeSkeleton produces a head at the end of arrows and none on lines", () => {
+  const line = shapeSkeleton({}, recogniseShape({ points: lineStroke(0, 0, 200, 0) }));
+  assert.equal(line.type, "line");
+  assert.equal(line.endArrowhead, null);
+  assert.equal(line.startArrowhead, null);
+  const arrow = shapeSkeleton({}, recogniseShape({ points: arrowStroke() }));
+  assert.equal(arrow.type, "arrow");
+  assert.equal(arrow.endArrowhead, "arrow");
+});
+
+test("shapeSkeleton supplies defaults when the source element is missing", () => {
+  const shape = recogniseShape({ points: circleStroke(50) });
+  const skeleton = shapeSkeleton(null, shape);
+  assert.equal(skeleton.strokeColor, "#1e1e1e");
+  assert.equal(skeleton.strokeWidth, 2);
+  assert.deepEqual(skeleton.groupIds, []);
+  assert.equal(skeleton.frameId, null);
+});

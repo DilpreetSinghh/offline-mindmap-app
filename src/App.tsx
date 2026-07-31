@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CaptureUpdateAction, Excalidraw, MainMenu, loadFromBlob } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, MainMenu, convertToExcalidrawElements, loadFromBlob } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, LibraryItems } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement, Theme } from "@excalidraw/excalidraw/element/types";
 import BrowserDrawingsDialog from "./BrowserDrawingsDialog";
 import PdfExportDialog from "./PdfExportDialog";
+import { recogniseShape, shapeSkeleton } from "./shape-recognition.mjs";
 import {
   createDrawing, createRevision, getDrawing, getRevision, getWorkspaceMeta, hydrateRevision,
   openWhiteboardDatabase, pruneForQuota, putWorkspaceMeta, restoreRevision,
@@ -43,7 +44,11 @@ export default function App() {
   const dirtyRef = useRef(false);
   const trackingRef = useRef(false);
   const flushingRef = useRef<Promise<void> | null>(null);
+  const handledStrokesRef = useRef(new Set<string>());
+  const shapeRecognitionRef = useRef(true);
+  const [editorReady, setEditorReady] = useState(false);
   const [theme, setTheme] = useState<Theme>("light");
+  const [shapeRecognition, setShapeRecognition] = useState(true);
   const [libraryItems, setLibraryItems] = useState<LibraryItems>([]);
   const [initialData, setInitialData] = useState<WhiteboardScene | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -97,6 +102,9 @@ export default function App() {
         activeDrawingIdRef.current = meta.activeDrawingId;
         setLibraryItems(meta.libraryItems);
         setStorageWarning(meta.storagePolicy.warning);
+        const initialShapeRecognition = meta.preferences?.shapeRecognition ?? true;
+        shapeRecognitionRef.current = initialShapeRecognition;
+        setShapeRecognition(initialShapeRecognition);
         if (navigator.storage?.persist) void navigator.storage.persist();
         if (navigator.storage?.estimate) {
           void navigator.storage.estimate().then(async (estimate) => {
@@ -147,10 +155,52 @@ export default function App() {
     };
   }, [flushRevision]);
 
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || !shapeRecognition) return;
+    return api.onPointerUp((activeTool) => {
+      if (activeTool?.type !== "freedraw") return;
+      const elements = api.getSceneElements();
+      const stroke = elements[elements.length - 1];
+      if (!stroke || stroke.type !== "freedraw" || stroke.isDeleted) return;
+      if (handledStrokesRef.current.has(stroke.id)) return;
+      handledStrokesRef.current.add(stroke.id);
+      const shape = recogniseShape(stroke);
+      if (!shape) return;
+      const [replacement] = convertToExcalidrawElements([shapeSkeleton(stroke, shape) as unknown as NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number]]);
+      if (!replacement || replacement.isDeleted) return;
+      const next = elements.map((element) => (element.id === stroke.id ? replacement : element));
+      sceneRef.current = { ...sceneRef.current, elements: next };
+      dirtyRef.current = true;
+      api.updateScene({
+        elements: next,
+        appState: { ...api.getAppState(), selectedElementIds: { [replacement.id]: true } },
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+      void flushRevision();
+    });
+  }, [shapeRecognition, editorReady, flushRevision]);
+
+  const toggleShapeRecognition = useCallback(() => {
+    const next = !shapeRecognitionRef.current;
+    shapeRecognitionRef.current = next;
+    setShapeRecognition(next);
+    const database = databaseRef.current;
+    if (database) {
+      void getWorkspaceMeta(database).then((meta) => putWorkspaceMeta(database, {
+        ...meta,
+        preferences: { ...meta.preferences, shapeRecognition: next },
+      })).catch(() => {
+        // The toggle still applies for this session when persistence fails.
+      });
+    }
+  }, []);
+
   const importFile = useCallback(async (file: File, handle: FileSystemFileHandle | null) => {
     const api = apiRef.current;
     if (!api) return;
     await flushRevision();
+    handledStrokesRef.current.clear();
     const database = databaseRef.current;
     if (database) {
       const drawing = await createDrawing(database, file.name.replace(/\.(excalidraw|json|png|svg)$/i, "") || "Imported drawing");
@@ -182,6 +232,7 @@ export default function App() {
 
   const createBlankDrawing = useCallback(async () => {
     await flushRevision();
+    handledStrokesRef.current.clear();
     const database = databaseRef.current;
     if (!database) return;
     const drawing = await createDrawing(database);
@@ -195,6 +246,7 @@ export default function App() {
 
   const openBrowserDrawing = useCallback(async (drawing: DrawingRecord) => {
     await flushRevision();
+    handledStrokesRef.current.clear();
     const database = databaseRef.current;
     const api = apiRef.current;
     if (!database || !api || !drawing.latestRevisionId) return;
@@ -251,6 +303,7 @@ export default function App() {
       <Excalidraw
         excalidrawAPI={(api) => {
           apiRef.current = api;
+          setEditorReady(true);
           window.setTimeout(() => { trackingRef.current = true; }, 500);
         }}
         initialData={{ ...initialData, libraryItems }}
@@ -284,6 +337,16 @@ export default function App() {
             onSelect={toggleTheme}
           >
             {theme === "dark" ? "Light mode" : "Dark mode"}
+          </MainMenu.Item>
+          <MainMenu.Item
+            data-testid="toggle-shape-recognition"
+            aria-label={shapeRecognition ? "Turn off shape recognition" : "Turn on shape recognition"}
+            icon={shapeRecognition
+              ? <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41Z" /></svg>
+              : <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 2a8 8 0 0 1 7.9 7H4.1A8 8 0 0 1 12 4Z" /></svg>}
+            onSelect={() => { void toggleShapeRecognition(); }}
+          >
+            {shapeRecognition ? "Shape recognition: on" : "Shape recognition: off"}
           </MainMenu.Item>
           <MainMenu.Separator />
           <MainMenu.Item onSelect={() => setLibraryOpen(true)}>Browser drawings…</MainMenu.Item>
