@@ -248,19 +248,6 @@ export default function App() {
           if (file) void importFile(file, null);
         }} />
       {storageWarning ? <aside className="storage-warning" role="alert">{storageWarning}</aside> : null}
-      <button
-        className="theme-toggle"
-        type="button"
-        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-        onClick={toggleTheme}
-      >
-        {theme === "dark" ? (
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" /></svg>
-        ) : (
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.3A9 9 0 0 1 8.7 3.9 9 9 0 1 0 20.1 15.3Z" /></svg>
-        )}
-      </button>
       <Excalidraw
         excalidrawAPI={(api) => {
           apiRef.current = api;
@@ -288,6 +275,16 @@ export default function App() {
           <MainMenu.DefaultItems.SaveToActiveFile />
           <MainMenu.DefaultItems.Export />
           <MainMenu.DefaultItems.SaveAsImage />
+          <MainMenu.Item
+            data-testid="toggle-dark-mode"
+            aria-label={theme === "dark" ? "Light mode" : "Dark mode"}
+            icon={theme === "dark"
+              ? <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" /></svg>
+              : <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.3A9 9 0 0 1 8.7 3.9 9 9 0 1 0 20.1 15.3Z" /></svg>}
+            onSelect={toggleTheme}
+          >
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </MainMenu.Item>
           <MainMenu.Separator />
           <MainMenu.Item onSelect={() => setLibraryOpen(true)}>Browser drawings…</MainMenu.Item>
           <MainMenu.Item onSelect={() => setPdfOpen(true)}>Export PDF…</MainMenu.Item>
@@ -296,7 +293,6 @@ export default function App() {
           <MainMenu.DefaultItems.CommandPalette />
           <MainMenu.DefaultItems.Help />
           <MainMenu.DefaultItems.ClearCanvas />
-          <MainMenu.DefaultItems.ToggleTheme onSelect={applyTheme} />
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
       </Excalidraw>

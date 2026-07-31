@@ -17,29 +17,15 @@ body {
   height: 100%;
 }
 
-.theme-toggle {
-  position: fixed;
-  z-index: 12;
-  top: 68px;
-  left: 16px;
-  display: grid;
-  width: 36px;
-  height: 36px;
-  padding: 8px;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: #ececf4;
-  color: #1b1b1f;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
-  cursor: pointer;
+.whiteboard-app .dropdown-menu-item svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-
-.theme-toggle:hover { background: #e2e2eb; }
-.theme-toggle:focus-visible { outline: 2px solid #6965db; outline-offset: 2px; }
-.theme-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentcolor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.whiteboard-app[data-theme="dark"] .theme-toggle { background: #353541; color: #f1f1f5; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); }
-.whiteboard-app[data-theme="dark"] .theme-toggle:hover { background: #424250; }
 
 .whiteboard-loading {
   display: grid;
