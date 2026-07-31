@@ -85,6 +85,8 @@ test("converts a freehand circle into an ellipse and back via the menu toggle", 
   await page.keyboard.press("p");
   await drawFreehandCircle(page, 640, 460, 40);
   await page.keyboard.press("ControlOrMeta+s");
-  const types = await latestSceneTypes(page);
-  expect(types.filter((type) => type === "freedraw").length).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const types = await latestSceneTypes(page);
+    return types.filter((type) => type === "freedraw").length;
+  }).toBeGreaterThan(0);
 });

@@ -170,9 +170,10 @@ export default function App() {
       handledStrokesRef.current.add(stroke.id);
       const timer = window.setTimeout(() => {
         pendingShapesRef.current.delete(stroke.id);
+        if (!shapeRecognitionRef.current) return;
         const current = api.getSceneElements();
-        const latest = current[current.length - 1];
-        if (!latest || latest.id !== stroke.id || latest.isDeleted) return;
+        const latest = current.find((element) => element.id === stroke.id);
+        if (!latest || latest.isDeleted) return;
         const shape = recogniseShape(latest);
         if (!shape) return;
         const [replacement] = convertToExcalidrawElements([shapeSkeleton(latest, shape) as unknown as NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number]]);
@@ -191,9 +192,15 @@ export default function App() {
     });
   }, [shapeRecognition, editorReady, flushRevision]);
 
+  const clearPendingShapes = useCallback(() => {
+    for (const timer of pendingShapesRef.current.values()) window.clearTimeout(timer);
+    pendingShapesRef.current.clear();
+  }, []);
+
   const toggleShapeRecognition = useCallback(() => {
     const next = !shapeRecognitionRef.current;
     shapeRecognitionRef.current = next;
+    if (!next) clearPendingShapes();
     setShapeRecognition(next);
     const database = databaseRef.current;
     if (database) {
@@ -204,12 +211,7 @@ export default function App() {
         // The toggle still applies for this session when persistence fails.
       });
     }
-  }, []);
-
-  const clearPendingShapes = useCallback(() => {
-    for (const timer of pendingShapesRef.current.values()) window.clearTimeout(timer);
-    pendingShapesRef.current.clear();
-  }, []);
+  }, [clearPendingShapes]);
 
   useEffect(() => clearPendingShapes, [clearPendingShapes]);
 
