@@ -199,6 +199,67 @@ test("rejects a wavy stroke instead of converting it to a line", () => {
   assert.equal(recogniseShape({ points: wavyStroke() }), null);
 });
 
+function realisticStroke(vertices, jitter, bow, random) {
+  const mid = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const corner = (a, b, c, t) => {
+    const p = mid(a, b, 0.94);
+    const q = mid(b, c, 0.06);
+    const u = 1 - t;
+    return [u * u * p[0] + 2 * u * t * b[0] + t * t * q[0], u * u * p[1] + 2 * u * t * b[1] + t * t * q[1]];
+  };
+  const points = [];
+  const count = vertices.length;
+  for (let edge = 0; edge < count; edge += 1) {
+    const a = vertices[edge];
+    const b = vertices[(edge + 1) % count];
+    const c = vertices[(edge + 2) % count];
+    const start = mid(a, b, 0.06);
+    const end = mid(a, b, 0.94);
+    const nx = -(b[1] - a[1]);
+    const ny = b[0] - a[0];
+    const norm = Math.hypot(nx, ny) || 1;
+    for (let i = 0; i < 10; i += 1) {
+      const t = i / 10;
+      const [x, y] = mid(start, end, t);
+      const arc = bow * Math.sin(Math.PI * t);
+      points.push([x + nx / norm * arc + (random() - 0.5) * jitter, y + ny / norm * arc + (random() - 0.5) * jitter]);
+    }
+    for (let i = 1; i <= 5; i += 1) {
+      const [x, y] = corner(a, b, c, i / 6);
+      points.push([x + (random() - 0.5) * jitter, y + (random() - 0.5) * jitter]);
+    }
+  }
+  return points;
+}
+
+const sloppySquare = () => realisticStroke([[-50, -50], [50, -50], [50, 50], [-50, 50]], 3, 5, mulberry32(21));
+const sloppyTriangle = () => realisticStroke([[-55, 42], [58, 40], [0, -52]], 3, 4, mulberry32(22));
+const sloppyDiamond = () => realisticStroke([[0, -52], [52, 0], [0, 52], [-52, 0]], 3, 4, mulberry32(23));
+const sloppyCircle = () => Array.from({ length: 44 }, (_, i) => {
+  const angle = i / 44 * Math.PI * 2;
+  const radius = 55 + (mulberry32(24 + Math.floor(i / 11))() - 0.5) * 10;
+  return [radius * Math.cos(angle), radius * Math.sin(angle)];
+});
+
+test("converts realistic wobbly shapes to their correct perfect equivalents", () => {
+  const circle = recogniseShape({ points: sloppyCircle() });
+  assert.equal(circle.type, "ellipse");
+  const square = recogniseShape({ points: sloppySquare() });
+  assert.equal(square.type, "rectangle");
+  assert.ok(Math.abs(square.width - 100) < 12);
+  assert.ok(Math.abs(square.height - 100) < 12);
+  const triangle = recogniseShape({ points: sloppyTriangle() });
+  assert.equal(triangle.type, "triangle");
+  assert.equal(triangle.points.length, 3);
+  const diamond = recogniseShape({ points: sloppyDiamond() });
+  assert.equal(diamond.type, "diamond");
+});
+
+test("never converts a wobbly square into an ellipse", () => {
+  const square = recogniseShape({ points: sloppySquare() });
+  assert.notEqual(square?.type, "ellipse");
+});
+
 test("rejects strokes that are too small or too short to classify", () => {
   assert.equal(recogniseShape({ points: circleStroke(3) }), null);
   assert.equal(recogniseShape({ points: [[0, 0], [5, 0], [10, 0], [15, 0]] }), null);
@@ -247,7 +308,7 @@ test("shapeSkeleton preserves freehand styling on the replacement element", () =
   assert.equal(skeleton.fillStyle, "hachure");
   assert.equal(skeleton.strokeWidth, 4);
   assert.equal(skeleton.strokeStyle, "dashed");
-  assert.equal(skeleton.roughness, 2);
+  assert.equal(skeleton.roughness, 0);
   assert.equal(skeleton.opacity, 60);
   assert.deepEqual(skeleton.groupIds, ["group-1"]);
   assert.equal(skeleton.frameId, "frame-9");

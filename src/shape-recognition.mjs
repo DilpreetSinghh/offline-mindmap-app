@@ -5,9 +5,9 @@ export const SHAPE_RECOGNITION_DEFAULTS = Object.freeze({
   minDimension: 10,
   closureAbsolute: 14,
   closureRatio: 0.2,
-  radiusDeviation: 0.14,
-  circleFillMin: 0.58,
-  circleFillMax: 0.85,
+  radiusDeviation: 0.09,
+  circleFillMin: 0.6,
+  circleFillMax: 0.8,
   rectFillMin: 0.72,
   rectPerimeterRatio: 1.45,
   diamondFillMin: 0.42,
@@ -15,14 +15,16 @@ export const SHAPE_RECOGNITION_DEFAULTS = Object.freeze({
   triangleFillMin: 0.48,
   triangleFillMax: 0.66,
   cornerAngle: 32,
+  maxCornerAngle: 140,
   sampleCount: 64,
-  cornerClusterRatio: 0.06,
+  cornerClusterRatio: 0.125,
   lineDeviation: 0.09,
   lineArcRatio: 1.18,
   arrowBendAngle: 60,
   arrowBackAngle: 105,
   minimumAspectForRotation: 1.15,
   angleSnap: 0.15,
+  ellipseSkipRadiusDeviationAspect: 1.25,
 });
 
 function vectorAngleDegrees(u, v) {
@@ -136,7 +138,7 @@ function detectCorners(points, options, closed = false) {
     const middle = samples[i];
     const next = samples[(i + 2) % count];
     const angle = turningAngleDegrees(previous, middle, next);
-    if (angle >= options.cornerAngle) corners.push({ index: i, angle, point: middle });
+    if (angle >= options.cornerAngle && angle <= options.maxCornerAngle) corners.push({ index: i, angle, point: middle });
   }
   const clusterWindow = Math.max(2, Math.round(options.sampleCount * options.cornerClusterRatio));
   const clusters = [];
@@ -287,13 +289,17 @@ function closedShape(points, bounds, options) {
   const fillRatio = area / (bounds.width * bounds.height);
   if (fillRatio <= 0.05) return null;
   const centroid = centroidOf(points);
-  const radii = points.map((point) => distance(point, centroid));
+  const radii = points.map((point) => distance(point, [centroid.x, centroid.y]));
   const meanRadius = radii.reduce((total, radius) => total + radius, 0) / radii.length;
   const variance = radii.reduce((total, radius) => total + (radius - meanRadius) ** 2, 0) / radii.length;
   const radiusDeviation = meanRadius > 0 ? Math.sqrt(variance) / meanRadius : 0;
   const corners = detectCorners(points, options, true);
 
-  if (radiusDeviation <= options.radiusDeviation && fillRatio >= options.circleFillMin && fillRatio <= options.circleFillMax) {
+  const aspect = Math.max(bounds.width / bounds.height, bounds.height / bounds.width);
+  const roundEnough = aspect <= options.ellipseSkipRadiusDeviationAspect
+    ? radiusDeviation <= options.radiusDeviation
+    : true;
+  if (roundEnough && fillRatio >= options.circleFillMin && fillRatio <= options.circleFillMax) {
     return ellipseShape(points, bounds, options);
   }
 
@@ -391,7 +397,7 @@ export function shapeSkeleton(source, shape) {
     fillStyle: source?.fillStyle ?? "solid",
     strokeWidth: source?.strokeWidth ?? 2,
     strokeStyle: source?.strokeStyle ?? "solid",
-    roughness: source?.roughness ?? 1,
+    roughness: 0,
     opacity: source?.opacity ?? 100,
     groupIds: Array.isArray(source?.groupIds) ? source.groupIds : [],
     frameId: source?.frameId ?? null,
