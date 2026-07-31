@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 declare const __SOURCE_SHA__: string;
+declare const __WHITEBOARD_DATABASE_NAME__: string;
 
 interface Window {
   EXCALIDRAW_ASSET_PATH?: string;

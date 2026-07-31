@@ -1,8 +1,8 @@
-name: Deploy public beta to Pages
+name: Deploy production and public beta to Pages
 
 on:
   push:
-    branches: [public-beta]
+    branches: [main, public-beta]
   workflow_dispatch:
 
 permissions:
@@ -21,29 +21,59 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out production
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: production
+      - name: Check out public beta
+        uses: actions/checkout@v7
         with:
           ref: public-beta
+          path: beta-source
+      - name: Read production source SHA
+        id: production-source
+        working-directory: production
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Read public-beta source SHA
+        id: beta-source
+        working-directory: beta-source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/configure-pages@v6
-      - name: Verify public-beta source
-        run: test "$(git branch --show-current)" = "public-beta"
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
-      - name: Install locked dependencies
-        run: npm install --no-audit --no-fund
-      - name: Build Vite site
+      - name: Install production dependencies
+        working-directory: production
+        run: npm ci --no-audit --no-fund
+      - name: Build production site
+        working-directory: production
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ steps.production-source.outputs.sha }}
         run: npm run build
-      - name: Verify deployed source metadata
+      - name: Install public-beta dependencies
+        working-directory: beta-source
+        run: npm ci --no-audit --no-fund
+      - name: Build isolated public-beta site
+        working-directory: beta-source
         env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: grep -F "name=\"source-commit\" content=\"${SOURCE_SHA}\"" dist/index.html
+          SOURCE_SHA: ${{ steps.beta-source.outputs.sha }}
+          WHITEBOARD_DATABASE_NAME: offline-whiteboard-beta-v1
+        run: npm run build
+      - name: Assemble production and beta routes
+        run: |
+          mkdir -p _site/beta
+          cp -R production/dist/. _site/
+          cp -R beta-source/dist/. _site/beta/
+      - name: Verify assembled routes
+        run: |
+          test -f _site/index.html
+          test -f _site/legacy/index.html
+          test -f _site/beta/index.html
+          test -f _site/beta/legacy/index.html
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: dist
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

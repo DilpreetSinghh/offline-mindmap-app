@@ -1,7 +1,9 @@
 import type { AppState, BinaryFileData, BinaryFiles, LibraryItems } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 
-export const WHITEBOARD_DB_NAME = "offline-whiteboard-v1";
+export const WHITEBOARD_DB_NAME = typeof __WHITEBOARD_DATABASE_NAME__ === "string"
+  ? __WHITEBOARD_DATABASE_NAME__
+  : "offline-whiteboard-v1";
 export const WHITEBOARD_DB_VERSION = 1;
 export const DRAWINGS_STORE = "drawings";
 export const REVISIONS_STORE = "revisions";
