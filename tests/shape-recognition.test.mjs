@@ -260,6 +260,19 @@ test("never converts a wobbly square into an ellipse", () => {
   assert.notEqual(square?.type, "ellipse");
 });
 
+test("places the replacement shape exactly where the stroke was drawn", () => {
+  const relativePoints = Array.from({ length: 48 }, (_, index) => {
+    const angle = index / 48 * Math.PI * 2;
+    return [50 * Math.cos(angle) - 50, 50 * Math.sin(angle)];
+  });
+  const shape = recogniseShape({ x: 300, y: 400, points: relativePoints });
+  assert.equal(shape.type, "ellipse");
+  assert.ok(Math.abs(shape.x - 200) < 3);
+  assert.ok(Math.abs(shape.y - 350) < 3);
+  assert.ok(Math.abs(shape.width - 100) < 3);
+  assert.ok(Math.abs(shape.height - 100) < 3);
+});
+
 test("rejects strokes that are too small or too short to classify", () => {
   assert.equal(recogniseShape({ points: circleStroke(3) }), null);
   assert.equal(recogniseShape({ points: [[0, 0], [5, 0], [10, 0], [15, 0]] }), null);

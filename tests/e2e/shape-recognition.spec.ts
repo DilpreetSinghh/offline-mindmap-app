@@ -7,14 +7,32 @@ async function latestSceneTypes(page: Page): Promise<string[]> {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const revisions = await new Promise<Array<{ createdAt: number; scene: { elements: Array<{ type: string }> } }>>((resolve, reject) => {
+    const revisions = await new Promise<Array<{ createdAt: number; scene: { elements: Array<{ type: string; x: number; y: number; width: number; height: number }> } }>>((resolve, reject) => {
       const transaction = database.transaction("revisions", "readonly");
       const request = transaction.objectStore("revisions").getAll();
-      request.onsuccess = () => resolve(request.result as Array<{ createdAt: number; scene: { elements: Array<{ type: string }> } }>);
+      request.onsuccess = () => resolve(request.result as Array<{ createdAt: number; scene: { elements: Array<{ type: string; x: number; y: number; width: number; height: number }> } }>);
       request.onerror = () => reject(request.error);
     });
     const latest = revisions.sort((a, b) => b.createdAt - a.createdAt)[0];
     return latest ? latest.scene.elements.map((element) => element.type) : [];
+  });
+}
+
+async function latestScene(page: Page): Promise<Array<{ type: string; x: number; y: number; width: number; height: number }>> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("offline-whiteboard-v1");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const revisions = await new Promise<Array<{ createdAt: number; scene: { elements: Array<{ type: string; x: number; y: number; width: number; height: number }> } }>>((resolve, reject) => {
+      const transaction = database.transaction("revisions", "readonly");
+      const request = transaction.objectStore("revisions").getAll();
+      request.onsuccess = () => resolve(request.result as Array<{ createdAt: number; scene: { elements: Array<{ type: string; x: number; y: number; width: number; height: number }> } }>);
+      request.onerror = () => reject(request.error);
+    });
+    const latest = revisions.sort((a, b) => b.createdAt - a.createdAt)[0];
+    return latest ? latest.scene.elements : [];
   });
 }
 
@@ -45,6 +63,16 @@ test("converts a freehand circle into an ellipse and back via the menu toggle", 
   await drawFreehandCircle(page, 640, 360, 40);
   await page.keyboard.press("ControlOrMeta+s");
   await expect.poll(async () => (await latestSceneTypes(page)).includes("ellipse")).toBe(true);
+  const elements = await latestScene(page);
+  const ellipse = elements.find((element) => element.type === "ellipse");
+  expect(ellipse).toBeDefined();
+  // Scene coordinates are offset from the pointer position by the Excalidraw
+  // chrome (toolbar/menu); the previous bug placed shapes hundreds of pixels
+  // away at the element-local origin instead.
+  expect(Math.abs(ellipse!.x - 560)).toBeLessThan(80);
+  expect(Math.abs(ellipse!.y - 280)).toBeLessThan(80);
+  expect(Math.abs(ellipse!.width - 80)).toBeLessThan(10);
+  expect(Math.abs(ellipse!.height - 80)).toBeLessThan(10);
 
   await page.getByTestId("main-menu-trigger").click();
   await expect(page.getByTestId("toggle-shape-recognition")).toContainText("on");

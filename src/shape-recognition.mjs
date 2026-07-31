@@ -11,13 +11,14 @@ export const SHAPE_RECOGNITION_DEFAULTS = Object.freeze({
   rectFillMin: 0.72,
   rectPerimeterRatio: 1.45,
   diamondFillMin: 0.42,
-  diamondEdgeTolerance: 0.18,
+  diamondEdgeTolerance: 0.2,
   triangleFillMin: 0.48,
   triangleFillMax: 0.66,
-  cornerAngle: 32,
-  maxCornerAngle: 140,
+  cornerAngle: 55,
+  cornerWindow: 3,
   sampleCount: 64,
-  cornerClusterRatio: 0.125,
+  cornerClusterRatio: 0.09,
+  rectCornerFillMin: 0.8,
   lineDeviation: 0.09,
   lineArcRatio: 1.18,
   arrowBendAngle: 60,
@@ -38,7 +39,7 @@ function distance(a, b) {
   return Math.hypot(b[0] - a[0], b[1] - a[1]);
 }
 
-export function absolutePoints(points) {
+export function absolutePoints(points, originX = 0, originY = 0) {
   if (!Array.isArray(points)) return [];
   const parsed = [];
   for (const point of points) {
@@ -49,8 +50,8 @@ export function absolutePoints(points) {
     parsed.push([x, y]);
   }
   if (!parsed.length) return [];
-  const [originX, originY] = parsed[0];
-  const relative = Math.hypot(originX, originY) < 0.001;
+  const [firstX, firstY] = parsed[0];
+  const relative = Math.hypot(firstX, firstY) < 0.001;
   const result = [];
   for (const [x, y] of parsed) {
     const absolute = relative ? [x + originX, y + originY] : [x, y];
@@ -121,26 +122,17 @@ function resample(points, count) {
   return samples;
 }
 
-function turningAngleDegrees(previous, middle, next) {
-  return vectorAngleDegrees(
-    [middle[0] - previous[0], middle[1] - previous[1]],
-    [next[0] - middle[0], next[1] - middle[1]],
-  );
-}
-
 function detectCorners(points, options, closed = false) {
   const samples = resample(points, options.sampleCount);
   const count = samples.length;
+  const turns = samples.map((_, i) => signedTurningDegrees(samples[(i - 1 + count) % count], samples[i], samples[(i + 1) % count]));
   const corners = [];
   for (let i = 0; i < count; i += 1) {
-    if (!closed && (i === 0 || i === count - 1)) continue;
-    const previous = samples[(i - 2 + count) % count];
-    const middle = samples[i];
-    const next = samples[(i + 2) % count];
-    const angle = turningAngleDegrees(previous, middle, next);
-    if (angle >= options.cornerAngle && angle <= options.maxCornerAngle) corners.push({ index: i, angle, point: middle });
+    let total = 0;
+    for (let k = -options.cornerWindow; k <= options.cornerWindow; k += 1) total += turns[(i + k + count) % count];
+    if (Math.abs(total) >= options.cornerAngle) corners.push({ index: i, angle: Math.abs(total), point: samples[i] });
   }
-  const clusterWindow = Math.max(2, Math.round(options.sampleCount * options.cornerClusterRatio));
+  const clusterWindow = Math.max(3, Math.round(options.sampleCount * options.cornerClusterRatio));
   const clusters = [];
   for (const corner of corners) {
     const last = clusters[clusters.length - 1];
@@ -164,6 +156,15 @@ function detectCorners(points, options, closed = false) {
     }
   }
   return clusters;
+}
+
+function signedTurningDegrees(previous, middle, next) {
+  const u = [middle[0] - previous[0], middle[1] - previous[1]];
+  const v = [next[0] - middle[0], next[1] - middle[1]];
+  const denominator = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
+  if (!denominator) return 0;
+  const cosine = Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / denominator));
+  return (u[0] * v[1] - u[1] * v[0] >= 0 ? 1 : -1) * Math.acos(cosine) * 180 / Math.PI;
 }
 
 function fitLine(points) {
@@ -310,7 +311,9 @@ function closedShape(points, bounds, options) {
       if (fillRatio >= options.diamondFillMin && diamondCornersAtMidpoints(corners, bounds, options)) {
         return diamondShape(points, bounds, options);
       }
-      if (corners.every((corner) => Math.abs(Math.abs(corner.angle) - 90) <= 28)) {
+      const cornerFill = polygonArea(corners.map((corner) => corner.point)) / (bounds.width * bounds.height);
+      const rotated = Math.abs(fitLine(points).angle) > options.angleSnap;
+      if (cornerFill >= options.rectCornerFillMin || rotated) {
         return rectangleShape(points, fitLine(points).angle, options);
       }
     }
@@ -369,7 +372,7 @@ function openShape(points, options) {
 export function recogniseShape(element, options = {}) {
   const settings = { ...SHAPE_RECOGNITION_DEFAULTS, ...options };
   if (!settings.enabled) return null;
-  const points = absolutePoints(element?.points);
+  const points = absolutePoints(element?.points, element?.x, element?.y);
   if (points.length < settings.minPoints) return null;
   const bounds = bboxOf(points);
   if (Math.max(bounds.width, bounds.height) < settings.minDimension || bounds.width * bounds.height === 0) return null;
