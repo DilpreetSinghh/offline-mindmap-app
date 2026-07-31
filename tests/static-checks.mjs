@@ -17,6 +17,8 @@ assert.match(app, /<Excalidraw/);
 assert.match(app, /loadFromBlob/);
 assert.match(app, /Browser drawings…/);
 assert.match(app, /Export PDF…/);
+assert.match(app, /className="theme-toggle"/);
+assert.match(app, /ToggleTheme onSelect=\{applyTheme\}/);
 assert.doesNotMatch(app, /SimpleMindmap|OutlineView|NodeDetailsDialog|mindmap-operations|custom search/i);
 assert.match(database, /offline-whiteboard-v1/);
 assert.match(database, /DRAWINGS_STORE/);

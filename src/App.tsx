@@ -218,10 +218,28 @@ export default function App() {
     if (updated) await openBrowserDrawing(updated);
   }, [flushRevision, openBrowserDrawing]);
 
+  const applyTheme = useCallback((nextTheme: Theme) => {
+    const api = apiRef.current;
+    if (!api || api.getAppState().theme === nextTheme) return;
+    api.updateScene({
+      appState: {
+        ...api.getAppState(),
+        theme: nextTheme,
+      },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+    setTheme(nextTheme);
+    dirtyRef.current = true;
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    applyTheme(theme === "dark" ? "light" : "dark");
+  }, [applyTheme, theme]);
+
   if (!initialData) return <main className="whiteboard-loading">Opening Offline Whiteboard…</main>;
 
   return (
-    <main className="whiteboard-app" aria-label="Offline Whiteboard">
+    <main className="whiteboard-app" data-theme={theme} aria-label="Offline Whiteboard">
       <input ref={fallbackInputRef} className="visually-hidden" type="file"
         accept=".excalidraw,.json,.png,.svg,application/json,image/png,image/svg+xml"
         onChange={(event) => {
@@ -230,6 +248,19 @@ export default function App() {
           if (file) void importFile(file, null);
         }} />
       {storageWarning ? <aside className="storage-warning" role="alert">{storageWarning}</aside> : null}
+      <button
+        className="theme-toggle"
+        type="button"
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        onClick={toggleTheme}
+      >
+        {theme === "dark" ? (
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" /></svg>
+        ) : (
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.3A9 9 0 0 1 8.7 3.9 9 9 0 1 0 20.1 15.3Z" /></svg>
+        )}
+      </button>
       <Excalidraw
         excalidrawAPI={(api) => {
           apiRef.current = api;
@@ -265,7 +296,7 @@ export default function App() {
           <MainMenu.DefaultItems.CommandPalette />
           <MainMenu.DefaultItems.Help />
           <MainMenu.DefaultItems.ClearCanvas />
-          <MainMenu.DefaultItems.ToggleTheme onSelect={setTheme} />
+          <MainMenu.DefaultItems.ToggleTheme onSelect={applyTheme} />
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
       </Excalidraw>
