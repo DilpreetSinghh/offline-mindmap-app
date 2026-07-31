@@ -21,13 +21,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: public-beta
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - name: Verify public-beta source
         run: test "$(git branch --show-current)" = "public-beta"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -41,9 +41,9 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: grep -F "name=\"source-commit\" content=\"${SOURCE_SHA}\"" dist/index.html
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
