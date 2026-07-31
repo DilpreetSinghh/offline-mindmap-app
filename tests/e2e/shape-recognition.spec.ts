@@ -61,6 +61,7 @@ test("converts a freehand circle into an ellipse and back via the menu toggle", 
   await page.mouse.click(200, 100);
   await page.keyboard.press("p");
   await drawFreehandCircle(page, 640, 360, 40);
+  await page.waitForTimeout(2_000);
   await page.keyboard.press("ControlOrMeta+s");
   await expect.poll(async () => (await latestSceneTypes(page)).includes("ellipse")).toBe(true);
   const elements = await latestScene(page);

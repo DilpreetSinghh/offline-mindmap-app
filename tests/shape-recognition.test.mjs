@@ -260,6 +260,55 @@ test("never converts a wobbly square into an ellipse", () => {
   assert.notEqual(square?.type, "ellipse");
 });
 
+function overrunSquare(extraLength, random = mulberry32(31)) {
+  const corners = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  const points = [];
+  for (let edge = 0; edge < 4; edge += 1) {
+    const [x1, y1] = corners[edge];
+    const [x2, y2] = corners[(edge + 1) % 4];
+    for (let step = 0; step < 14; step += 1) {
+      const ratio = step / 14;
+      points.push([x1 + (x2 - x1) * ratio + (random() - 0.5) * 2, y1 + (y2 - y1) * ratio + (random() - 0.5) * 2]);
+    }
+  }
+  for (let step = 1; step <= extraLength / 7; step += 1) {
+    points.push([step * 7 + (random() - 0.5) * 2, (random() - 0.5) * 2]);
+  }
+  return points;
+}
+
+test("converts a square whose tail overruns the starting point", () => {
+  const shape = recogniseShape({ points: overrunSquare(30) });
+  assert.equal(shape.type, "rectangle");
+  assert.ok(Math.abs(shape.width - 100) < 6);
+  assert.ok(Math.abs(shape.height - 100) < 6);
+});
+
+test("converts a square whose tail starts a second lap before stopping", () => {
+  const shape = recogniseShape({ points: overrunSquare(180) });
+  assert.equal(shape.type, "rectangle");
+  assert.ok(Math.abs(shape.width - 100) < 8);
+  assert.ok(Math.abs(shape.height - 100) < 8);
+});
+
+test("converts a circle whose tail overruns the starting point", () => {
+  const points = circleStroke(50, 48, 2, mulberry32(32));
+  const last = points[points.length - 1];
+  for (let step = 1; step <= 6; step += 1) points.push([last[0] + step * 6, last[1]]);
+  const shape = recogniseShape({ points });
+  assert.equal(shape.type, "ellipse");
+});
+
+test("does not trim a plain straight line into a shape", () => {
+  const shape = recogniseShape({ points: lineStroke(0, 0, 200, 30, 1.5) });
+  assert.equal(shape.type, "line");
+  assert.ok(Math.abs(shape.points[1][0] - 200) < 5);
+});
+
+test("does not trim a wavy open stroke into a closed shape", () => {
+  assert.equal(recogniseShape({ points: wavyStroke() }), null);
+});
+
 test("places the replacement shape exactly where the stroke was drawn", () => {
   const relativePoints = Array.from({ length: 48 }, (_, index) => {
     const angle = index / 48 * Math.PI * 2;

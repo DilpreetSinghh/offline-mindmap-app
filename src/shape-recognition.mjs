@@ -23,7 +23,8 @@ export const SHAPE_RECOGNITION_DEFAULTS = Object.freeze({
   lineArcRatio: 1.18,
   arrowBendAngle: 60,
   arrowBackAngle: 105,
-  minimumAspectForRotation: 1.15,
+  rotationStrengthMin: 1.35,
+  shapeSnapAspect: 1.15,
   angleSnap: 0.15,
   ellipseSkipRadiusDeviationAspect: 1.25,
 });
@@ -125,7 +126,11 @@ function resample(points, count) {
 function detectCorners(points, options, closed = false) {
   const samples = resample(points, options.sampleCount);
   const count = samples.length;
-  const turns = samples.map((_, i) => signedTurningDegrees(samples[(i - 1 + count) % count], samples[i], samples[(i + 1) % count]));
+  const turns = samples.map((_, i) => signedTurningDegrees(
+    samples[(i - 2 + count) % count],
+    samples[i],
+    samples[(i + 2) % count],
+  ));
   const corners = [];
   for (let i = 0; i < count; i += 1) {
     let total = 0;
@@ -181,6 +186,9 @@ function fitLine(points) {
   }
   const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
   const direction = [Math.cos(angle), Math.sin(angle)];
+  const difference = sxx - syy;
+  const root = Math.sqrt(difference * difference + 4 * sxy * sxy);
+  const strength = (sxx + syy + root) / Math.max(1e-9, sxx + syy - root);
   let maxDeviation = 0;
   for (const [x, y] of points) {
     const dx = x - centroid.x;
@@ -191,7 +199,7 @@ function fitLine(points) {
   }
   const start = points[0];
   const end = points[points.length - 1];
-  return { angle, direction, maxDeviation, start, end, length: distance(start, end) };
+  return { angle, direction, strength, maxDeviation, start, end, length: distance(start, end) };
 }
 
 function rotateAround(point, center, radians) {
@@ -206,7 +214,12 @@ function orientedShape(type, points, angle, options) {
   let rotation = 0;
   if (Math.abs(angle) > options.angleSnap) rotation = angle;
   const rotated = rotation ? points.map((point) => rotateAround(point, centroidOf(points), -rotation)) : points;
-  const bounds = bboxOf(rotated);
+  let bounds = bboxOf(rotated);
+  const aspect = Math.max(bounds.width / bounds.height, bounds.height / bounds.width);
+  if (aspect <= options.shapeSnapAspect) {
+    rotation = 0;
+    bounds = bboxOf(points);
+  }
   return {
     type,
     x: bounds.x,
@@ -219,8 +232,8 @@ function orientedShape(type, points, angle, options) {
 }
 
 function ellipseShape(points, bounds, options) {
-  const aspect = Math.max(bounds.width / bounds.height, bounds.height / bounds.width);
-  const angle = aspect > options.minimumAspectForRotation ? fitLine(points).angle : 0;
+  const line = fitLine(points);
+  const angle = line.strength > options.rotationStrengthMin ? line.angle : 0;
   return orientedShape("ellipse", points, angle, options);
 }
 
@@ -237,7 +250,8 @@ function rectangleShape(points, angle, options) {
 
 function triangleShape(points, corners, options) {
   const centroid = centroidOf(points);
-  const angle = Math.abs(fitLine(points).angle) > options.angleSnap ? fitLine(points).angle : 0;
+  const line = fitLine(points);
+  const angle = line.strength > options.rotationStrengthMin ? line.angle : 0;
   const rotated = corners.map((corner) => rotateAround(corner.point, centroid, -angle));
   const rotatedBounds = bboxOf(rotated);
   const width = Math.max(1, rotatedBounds.width);
@@ -250,8 +264,8 @@ function triangleShape(points, corners, options) {
 }
 
 function diamondShape(points, bounds, options) {
-  const aspect = Math.max(bounds.width / bounds.height, bounds.height / bounds.width);
-  const angle = aspect > options.minimumAspectForRotation ? fitLine(points).angle : 0;
+  const line = fitLine(points);
+  const angle = line.strength > options.rotationStrengthMin ? line.angle : 0;
   return orientedShape("diamond", points, angle, options);
 }
 
@@ -369,16 +383,39 @@ function openShape(points, options) {
   return linearShape(points, options);
 }
 
+function trimStrokeOverrun(points, options) {
+  const start = points[0];
+  const bounds = bboxOf(points);
+  const diagonal = Math.hypot(bounds.width, bounds.height);
+  const closure = Math.max(options.closureAbsolute, options.closureRatio * diagonal);
+  const scanStart = Math.max(1, Math.floor(points.length * 0.35));
+  let bestIndex = points.length - 1;
+  let bestDistance = distance(start, points[points.length - 1]);
+  for (let i = scanStart; i < points.length - 1; i += 1) {
+    const candidate = distance(points[i], start);
+    if (candidate < bestDistance) {
+      bestDistance = candidate;
+      bestIndex = i;
+    }
+  }
+  if (bestIndex >= points.length - 1) return null;
+  if (bestDistance >= closure) return null;
+  return points.slice(0, bestIndex + 1);
+}
+
 export function recogniseShape(element, options = {}) {
   const settings = { ...SHAPE_RECOGNITION_DEFAULTS, ...options };
   if (!settings.enabled) return null;
   const points = absolutePoints(element?.points, element?.x, element?.y);
   if (points.length < settings.minPoints) return null;
-  const bounds = bboxOf(points);
+  const trimmed = trimStrokeOverrun(points, settings);
+  const shapePoints = trimmed ?? points;
+  const bounds = bboxOf(shapePoints);
   if (Math.max(bounds.width, bounds.height) < settings.minDimension || bounds.width * bounds.height === 0) return null;
-  const gap = distance(points[0], points[points.length - 1]);
+  const gap = distance(shapePoints[0], shapePoints[shapePoints.length - 1]);
   const closed = gap < Math.max(settings.closureAbsolute, settings.closureRatio * Math.hypot(bounds.width, bounds.height));
-  return closed ? closedShape(points, bounds, settings) : openShape(points, settings);
+  if (closed) return closedShape(shapePoints, bounds, settings);
+  return openShape(points, settings);
 }
 
 function elementId() {

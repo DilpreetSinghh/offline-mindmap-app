@@ -29,6 +29,8 @@ const OPEN_TYPES = [{
   },
 }];
 
+const SHAPE_RECOGNITION_DELAY_MS = 1_500;
+
 function applyScene(api: ExcalidrawImperativeAPI, scene: WhiteboardScene) {
   api.updateScene({ elements: scene.elements, appState: scene.appState as AppState, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   api.addFiles(Object.values(scene.files));
@@ -45,6 +47,7 @@ export default function App() {
   const trackingRef = useRef(false);
   const flushingRef = useRef<Promise<void> | null>(null);
   const handledStrokesRef = useRef(new Set<string>());
+  const pendingShapesRef = useRef(new Map<string, number>());
   const shapeRecognitionRef = useRef(true);
   const [editorReady, setEditorReady] = useState(false);
   const [theme, setTheme] = useState<Theme>("light");
@@ -165,19 +168,26 @@ export default function App() {
       if (!stroke || stroke.type !== "freedraw" || stroke.isDeleted) return;
       if (handledStrokesRef.current.has(stroke.id)) return;
       handledStrokesRef.current.add(stroke.id);
-      const shape = recogniseShape(stroke);
-      if (!shape) return;
-      const [replacement] = convertToExcalidrawElements([shapeSkeleton(stroke, shape) as unknown as NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number]]);
-      if (!replacement || replacement.isDeleted) return;
-      const next = elements.map((element) => (element.id === stroke.id ? replacement : element));
-      sceneRef.current = { ...sceneRef.current, elements: next };
-      dirtyRef.current = true;
-      api.updateScene({
-        elements: next,
-        appState: { ...api.getAppState(), selectedElementIds: { [replacement.id]: true } },
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-      });
-      void flushRevision();
+      const timer = window.setTimeout(() => {
+        pendingShapesRef.current.delete(stroke.id);
+        const current = api.getSceneElements();
+        const latest = current[current.length - 1];
+        if (!latest || latest.id !== stroke.id || latest.isDeleted) return;
+        const shape = recogniseShape(latest);
+        if (!shape) return;
+        const [replacement] = convertToExcalidrawElements([shapeSkeleton(latest, shape) as unknown as NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number]]);
+        if (!replacement || replacement.isDeleted) return;
+        const next = current.map((element) => (element.id === stroke.id ? replacement : element));
+        sceneRef.current = { ...sceneRef.current, elements: next };
+        dirtyRef.current = true;
+        api.updateScene({
+          elements: next,
+          appState: { ...api.getAppState(), selectedElementIds: { [replacement.id]: true } },
+          captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+        });
+        void flushRevision();
+      }, SHAPE_RECOGNITION_DELAY_MS);
+      pendingShapesRef.current.set(stroke.id, timer);
     });
   }, [shapeRecognition, editorReady, flushRevision]);
 
@@ -196,11 +206,19 @@ export default function App() {
     }
   }, []);
 
+  const clearPendingShapes = useCallback(() => {
+    for (const timer of pendingShapesRef.current.values()) window.clearTimeout(timer);
+    pendingShapesRef.current.clear();
+  }, []);
+
+  useEffect(() => clearPendingShapes, [clearPendingShapes]);
+
   const importFile = useCallback(async (file: File, handle: FileSystemFileHandle | null) => {
     const api = apiRef.current;
     if (!api) return;
     await flushRevision();
     handledStrokesRef.current.clear();
+    clearPendingShapes();
     const database = databaseRef.current;
     if (database) {
       const drawing = await createDrawing(database, file.name.replace(/\.(excalidraw|json|png|svg)$/i, "") || "Imported drawing");
@@ -233,6 +251,7 @@ export default function App() {
   const createBlankDrawing = useCallback(async () => {
     await flushRevision();
     handledStrokesRef.current.clear();
+    clearPendingShapes();
     const database = databaseRef.current;
     if (!database) return;
     const drawing = await createDrawing(database);
@@ -247,6 +266,7 @@ export default function App() {
   const openBrowserDrawing = useCallback(async (drawing: DrawingRecord) => {
     await flushRevision();
     handledStrokesRef.current.clear();
+    clearPendingShapes();
     const database = databaseRef.current;
     const api = apiRef.current;
     if (!database || !api || !drawing.latestRevisionId) return;
